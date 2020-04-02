@@ -1,3 +1,6 @@
+import numpy as np
+import torch
+
 def set_weights(parameters, weights, use_cuda):
     """
     Function used to set the value of a set of torch parameters given a

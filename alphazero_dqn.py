@@ -16,6 +16,7 @@ import os
 from gym import wrappers
 import matplotlib.pyplot as plt
 import torch
+from atari import Atari
 plt.style.use('ggplot')
 
 from helpers import (argmax,check_space,is_atari_game,copy_atari_state,store_safely,
@@ -29,17 +30,22 @@ class Model():
     
     def __init__(self,Env,lr,n_hidden_layers,n_hidden_units):
         # Check the Gym environment
-        self.action_dim, self.action_discrete  = check_space(Env.action_space)
-        self.state_dim, self.state_discrete  = check_space(Env.observation_space)
-        if not self.action_discrete: 
-            raise ValueError('Continuous action space not implemented')
+        # self.action_dim, self.action_discrete  = check_space(Env.action_space)
+        # self.state_dim, self.state_discrete  = check_space(Env.observation_space)
+        # if not self.action_discrete:
+        #     raise ValueError('Continuous action space not implemented')
+
+        self.state_dim = 64
+        self.action_dim = 4
+
+        self.x = x = tf.placeholder("float32", shape=np.append(None, self.state_dim), name='x')  # state
         
-        # Placeholders
-        if not self.state_discrete:
-            self.x = x = tf.placeholder("float32", shape=np.append(None,self.state_dim),name='x') # state  
-        else:
-            self.x = x = tf.placeholder("int32", shape=np.append(None,1)) # state
-            x = tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
+        # # Placeholders
+        # if not self.state_discrete:
+        #     self.x = x = tf.placeholder("float32", shape=np.append(None,self.state_dim),name='x') # state
+        # else:
+        #     self.x = x = tf.placeholder("int32", shape=np.append(None,1)) # state
+        #     x = tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
         
         # Feedforward: Can be modified to any representation function, e.g. convolutions, residual networks, etc. 
         for i in range(n_hidden_layers):
@@ -99,7 +105,10 @@ class State():
 
     def __init__(self,index,r,terminal,parent_action,na,model):
         ''' Initialize a new state '''
-        self.index = index # state
+        self.index = np.array(index) # state
+        self.index = np.expand_dims(self.index, 0)
+        self.index = torch.from_numpy(self.index)
+        self.index = self.index.cuda()
         self.r = r # reward upon arriving in this state
         self.terminal = terminal # whether the domain terminated in this state
         self.parent_action = parent_action
@@ -110,17 +119,20 @@ class State():
         # Child actions
         self.na = na
         self.child_actions = [Action(a,parent_state=self,Q_init=self.V) for a in range(na)]
-        self.priors = model.predict_pi(index[None,]).flatten()
+        # self.priors = model.predict_pi(index[None,]).flatten()
     
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
-        UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)]) 
+        # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
+        UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
         winner = argmax(UCT)
         return self.child_actions[winner]
 
     def evaluate(self):
         ''' Bootstrap the state value '''
-        self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)          
+        # self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
+        Q = self.model(self.index)
+        self.V = np.mean(Q.detach().cpu().numpy())
 
     def update(self):
         ''' update count on backward pass '''
@@ -162,6 +174,10 @@ class MCTS():
             while not state.terminal: 
                 action = state.select(c=c)
                 s1,r,t,_ = mcts_env.step(action.index)
+                s1 = np.array(s1)
+                s1 = np.expand_dims(s1, 0)
+                s1 = torch.from_numpy(s1)
+                s1 = s1.cuda()
                 if hasattr(action,'child_state'):
                     state = action.child_state # select
                     continue
@@ -206,17 +222,18 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     episode_returns = [] # storage
     timepoints = []
     # Environments
-    Env = make_game(game)
+    # Env = make_game(game)
+    Env = Atari(game)
     is_atari = is_atari_game(Env)
-    mcts_env = make_game(game) if is_atari else None
+    # mcts_env = make_game(game) if is_atari else None
+    mcts_env = Env
 
-    D = Database(max_size=data_size,batch_size=batch_size)        
+    # D = Database(max_size=data_size,batch_size=batch_size)
     # model = Model(Env=Env,lr=lr,n_hidden_layers=n_hidden_layers,n_hidden_units=n_hidden_units)
 
-    model = Network()
-    PATH = './weights-exp-0-38.npy'
-    pretrained_weights = torch.load(PATH)
-    model.load_state_dict(pretrained_weights)
+    model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
+    weights = np.load('./weights-exp-0-38.npy')
+    set_weights(model.parameters(), weights, True)
 
     t_total = 0 # total steps
     R_best = -np.Inf
@@ -231,21 +248,27 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
             a_store = []
             seed = np.random.randint(1e7) # draw some Env seed
             Env.seed(seed)      
-            if is_atari: 
+            if is_atari:
                 mcts_env.reset()
-                mcts_env.seed(seed)                                
+                mcts_env.seed(seed)
 
-            mcts = MCTS(root_index=s,root=None,model=model,na=model.action_dim,gamma=gamma) # the object responsible for MCTS searches                             
+            mcts = MCTS(root_index=s,root=None,model=model,na=Env.info.action_space.n,gamma=gamma) # the object responsible for MCTS searches
             for t in range(max_ep_len):
                 # MCTS step
                 mcts.search(n_mcts=n_mcts,c=c,Env=Env,mcts_env=mcts_env) # perform a forward search
                 state,pi,V = mcts.return_results(temp) # extract the root output
-                D.store((state,V,pi))
+                # D.store((state,V,pi))
 
                 # Make the true step
                 a = np.random.choice(len(pi),p=pi)
                 a_store.append(a)
                 s1,r,terminal,_ = Env.step(a)
+                s1 = np.array(s1)
+                s1 = np.expand_dims(s1, 0)
+                s1 = torch.from_numpy(s1)
+                s1 = s1.cuda()
+
+
                 R += r
                 t_total += n_mcts # total number of environment steps (counts the mcts steps)                
 
@@ -265,10 +288,10 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
                 R_best = R
             print('Finished episode {}, total return: {}, total time: {} sec'.format(ep,np.round(R,2),np.round((time.time()-start),1)))
             # Train
-            D.reshuffle()
-            for epoch in range(1):
-                for sb,Vb,pib in D:
-                    model.train(sb,Vb,pib)
+            # D.reshuffle()
+            # for epoch in range(1):
+            #     for sb,Vb,pib in D:
+            #         model.train(sb,Vb,pib)
     # Return results
     return episode_returns, timepoints, a_best, seed_best, R_best
 

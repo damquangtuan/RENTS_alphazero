@@ -116,6 +116,9 @@ class Atari(Environment):
         gamma = .99
         mdp_info = MDPInfo(observation_space, action_space, gamma, horizon)
 
+        self.observation_space = observation_space
+        self.action_space = action_space
+
         super().__init__(mdp_info)
 
     def reset(self, state=None):

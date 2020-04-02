@@ -36,7 +36,7 @@ class Model():
             self.x = x = tf.placeholder("float32", shape=np.append(None,self.state_dim),name='x') # state  
         else:
             self.x = x = tf.placeholder("int32", shape=np.append(None,1)) # state
-            x =  tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
+            x = tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
         
         # Feedforward: Can be modified to any representation function, e.g. convolutions, residual networks, etc. 
         for i in range(n_hidden_layers):
@@ -268,9 +268,9 @@ if __name__ == '__main__':
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
     parser.add_argument('--n_ep', type=int, default=500, help='Number of episodes')
     parser.add_argument('--n_mcts', type=int, default=64, help='Number of MCTS traces per step')
-    parser.add_argument('--max_ep_len', type=int, default=1000, help='Maximum number of steps per episode')
+    parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--c', type=float, default=1.5, help='UCT constant')
+    parser.add_argument('--c', type=float, default=5.0, help='UCT constant')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
     parser.add_argument('--gamma', type=float, default=1.0, help='Discount parameter')
     parser.add_argument('--data_size', type=int, default=1000, help='Dataset size (FIFO)')
