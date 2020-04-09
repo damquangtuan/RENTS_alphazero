@@ -17,6 +17,9 @@ from gym import wrappers
 import matplotlib.pyplot as plt
 import torch
 from atari import Atari
+from scipy.special import softmax
+from numpy.random import rand
+from scipy.special import logsumexp
 plt.style.use('ggplot')
 
 from helpers import (argmax,check_space,is_atari_game,copy_atari_state,store_safely,
@@ -25,6 +28,8 @@ from rl.make_game import make_game
 from dqn_net import Network
 from set_weights import set_weights
 
+
+TAU = 1.0
 #### Neural Networks ##
 class Model():
     
@@ -106,9 +111,6 @@ class State():
     def __init__(self,index,r,terminal,parent_action,na,model):
         ''' Initialize a new state '''
         self.index = np.array(index) # state
-        self.index = np.expand_dims(self.index, 0)
-        self.index = torch.from_numpy(self.index)
-        self.index = self.index.cuda()
         self.r = r # reward upon arriving in this state
         self.terminal = terminal # whether the domain terminated in this state
         self.parent_action = parent_action
@@ -123,22 +125,37 @@ class State():
     
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
-        # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
-        UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
+        UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
+        # UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
         winner = argmax(UCT)
         return self.child_actions[winner]
 
     def evaluate(self):
         ''' Bootstrap the state value '''
         # self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
+        self.index = np.expand_dims(self.index, 0)
+        self.index = torch.from_numpy(self.index)
+        self.index = self.index.cuda()
         Q = self.model(self.index)
         self.V = np.mean(Q.detach().cpu().numpy())
+        # self.V = TAU * logsumexp(Q.detach().cpu().numpy()/TAU)
+        # self.V = np.max(Q.detach().cpu().numpy())
+
+        self.priors = softmax(Q.detach().cpu().numpy()/TAU)
+        self.index = self.index.detach().cpu()
+
 
     def update(self):
         ''' update count on backward pass '''
         self.n += 1
-        UCT = np.array([child_action.Q for child_action in self.child_actions])
-        self.V = np.mean(UCT)
+        Q = np.array([child_action.Q for child_action in self.child_actions])
+
+        counts = np.array([child_action.n for child_action in self.child_actions])
+
+        self.V = np.sum((counts/np.sum(counts))*Q)[None]
+        # self.V = np.max(UCT)
+        # self.V = TAU * logsumexp(UCT)
+        # print("V: " + str(self.V) + "\n")
 
         
 class MCTS():
@@ -162,22 +179,18 @@ class MCTS():
 
         is_atari = is_atari_game(Env)
         if is_atari:
-            snapshot = copy_atari_state(Env) # for Atari: snapshot the root at the beginning     
+            snapshot = copy_atari_state(Env) # for Atari: snapshot the root at the beginning
         
         for i in range(n_mcts):     
             state = self.root # reset to root for new trace
             if not is_atari:
                 mcts_env = copy.deepcopy(Env) # copy original Env to rollout from
             else:
-                restore_atari_state(mcts_env,snapshot)            
+                restore_atari_state(mcts_env,snapshot)
             
             while not state.terminal: 
                 action = state.select(c=c)
                 s1,r,t,_ = mcts_env.step(action.index)
-                s1 = np.array(s1)
-                s1 = np.expand_dims(s1, 0)
-                s1 = torch.from_numpy(s1)
-                s1 = s1.cuda()
                 if hasattr(action,'child_state'):
                     state = action.child_state # select
                     continue
@@ -203,15 +216,16 @@ class MCTS():
         return self.root.index,pi_target,V_target
     
     def forward(self,a,s1):
+        s1 = np.array(s1)
         ''' Move the root forward '''
         if not hasattr(self.root.child_actions[a],'child_state'):
             self.root = None
             self.root_index = s1
         elif np.linalg.norm(self.root.child_actions[a].child_state.index - s1) > 0.01:
-            print('Warning: this domain seems stochastic. Not re-using the subtree for next search. '+
-                  'To deal with stochastic environments, implement progressive widening.')
+            # print('Warning: this domain seems stochastic. Not re-using the subtree for next search. '+
+            #       'To deal with stochastic environments, implement progressive widening.')
             self.root = None
-            self.root_index = s1            
+            self.root_index = s1
         else:
             self.root = self.root.child_actions[a].child_state
 
@@ -226,13 +240,16 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     Env = Atari(game)
     is_atari = is_atari_game(Env)
     # mcts_env = make_game(game) if is_atari else None
-    mcts_env = Env
+    mcts_env = Atari(game)
 
     # D = Database(max_size=data_size,batch_size=batch_size)
     # model = Model(Env=Env,lr=lr,n_hidden_layers=n_hidden_layers,n_hidden_units=n_hidden_units)
 
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
-    weights = np.load('./weights-exp-0-38.npy')
+    # weights = np.load('./weights-exp-0-38.npy')
+    weights = np.load('./weights-exp-0-25.npy')
+
+    # weights = np.array(rand(1687206))
     set_weights(model.parameters(), weights, True)
 
     t_total = 0 # total steps
@@ -243,7 +260,7 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
         sess.run(tf.global_variables_initializer())
         for ep in range(n_ep):    
             start = time.time()
-            s = Env.reset() 
+            s = Env.reset()
             R = 0.0 # Total return counter
             a_store = []
             seed = np.random.randint(1e7) # draw some Env seed
@@ -263,11 +280,6 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
                 a = np.random.choice(len(pi),p=pi)
                 a_store.append(a)
                 s1,r,terminal,_ = Env.step(a)
-                s1 = np.array(s1)
-                s1 = np.expand_dims(s1, 0)
-                s1 = torch.from_numpy(s1)
-                s1 = s1.cuda()
-
 
                 R += r
                 t_total += n_mcts # total number of environment steps (counts the mcts steps)                
@@ -300,13 +312,13 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
-    parser.add_argument('--n_ep', type=int, default=500, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=64, help='Number of MCTS traces per step')
-    parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
+    parser.add_argument('--n_ep', type=int, default=10, help='Number of episodes')
+    parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
+    parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--c', type=float, default=5.0, help='UCT constant')
+    parser.add_argument('--c', type=float, default=3.5, help='UCT constant')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
-    parser.add_argument('--gamma', type=float, default=1.0, help='Discount parameter')
+    parser.add_argument('--gamma', type=float, default=.99, help='Discount parameter')
     parser.add_argument('--data_size', type=int, default=1000, help='Dataset size (FIFO)')
     parser.add_argument('--batch_size', type=int, default=32, help='Minibatch size')
     parser.add_argument('--window', type=int, default=25, help='Smoothing window for visualization')

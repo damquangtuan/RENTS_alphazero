@@ -73,7 +73,7 @@ def prepare_control_env(env,game,modify):
         env.observation_space = gym.spaces.Box(np.array([-4.8,-10,-4.8,-10]),np.array([4.8,10,4.8,10]))        
     return env
 
-def prepare_atari_env(Env,frame_skip=3,repeat_action_prob=0.0,reward_clip=True):
+def prepare_atari_env(Env,frame_skip=4,repeat_action_prob=0.0,reward_clip=True):
     ''' Initialize an Atari environment '''
     env = get_base_env(Env)
     env.ale.setFloat('repeat_action_probability'.encode('utf-8'), repeat_action_prob)

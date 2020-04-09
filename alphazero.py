@@ -121,7 +121,8 @@ class State():
         ''' update count on backward pass '''
         self.n += 1
         UCT = np.array([child_action.Q for child_action in self.child_actions])
-        self.V = np.mean(UCT)
+        counts = np.array([child_action.n for child_action in self.child_actions])
+        self.V = np.sum((counts/np.sum(counts))*UCT)
 
         
 class MCTS():
@@ -187,8 +188,8 @@ class MCTS():
             self.root = None
             self.root_index = s1
         elif np.linalg.norm(self.root.child_actions[a].child_state.index - s1) > 0.01:
-            print('Warning: this domain seems stochastic. Not re-using the subtree for next search. '+
-                  'To deal with stochastic environments, implement progressive widening.')
+            # print('Warning: this domain seems stochastic. Not re-using the subtree for next search. '+
+            #       'To deal with stochastic environments, implement progressive widening.')
             self.root = None
             self.root_index = s1            
         else:
@@ -267,12 +268,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
     parser.add_argument('--n_ep', type=int, default=500, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=64, help='Number of MCTS traces per step')
+    parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--c', type=float, default=5.0, help='UCT constant')
+    parser.add_argument('--c', type=float, default=1.5, help='UCT constant')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
-    parser.add_argument('--gamma', type=float, default=1.0, help='Discount parameter')
+    parser.add_argument('--gamma', type=float, default=.99, help='Discount parameter')
     parser.add_argument('--data_size', type=int, default=1000, help='Dataset size (FIFO)')
     parser.add_argument('--batch_size', type=int, default=32, help='Minibatch size')
     parser.add_argument('--window', type=int, default=25, help='Smoothing window for visualization')
