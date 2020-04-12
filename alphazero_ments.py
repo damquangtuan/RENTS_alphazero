@@ -36,83 +36,22 @@ from dqn_net import Network
 from set_weights import set_weights
 
 
-
-V_TAU = .05
-
-P_TAU = .05
-
-V_TAU_NET = .04
-
-P_TAU_NET = .04
-
-EPSILON = .2
-#### Neu0al Networks ##
-# class Model():
-#
-#     def __init__(self,Env,lr,n_hidden_layers,n_hidden_units):
-#         # Check the Gym environment
-#         self.action_dim, self.action_discrete  = check_space(Env.action_space)
-#         self.state_dim, self.state_discrete  = check_space(Env.observation_space)
-#         if not self.action_discrete:
-#             raise ValueError('Continuous action space not implemented')
-#
-#         # Placeholders
-#         if not self.state_discrete:
-#             self.x = x = tf.placeholder("float32", shape=np.append(None,self.state_dim),name='x') # state
-#         else:
-#             self.x = x = tf.placeholder("int32", shape=np.append(None,1)) # state
-#             x =  tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
-#
-#         # Feedforward: Can be modified to any representation function, e.g. convolutions, residual networks, etc.
-#         for i in range(n_hidden_layers):
-#             x = slim.fully_connected(x,n_hidden_units,activation_fn=tf.nn.elu)
-#
-#         # Output
-#         # tau=0.03
-#         log_pi_hat = slim.fully_connected(x,self.action_dim,activation_fn=None)
-#         self.pi_hat = tf.nn.softmax(log_pi_hat) # policy head
-#         self.V_hat = slim.fully_connected(x,1,activation_fn=None) # value head
-#         # Q_hat_exp = slim.fully_connected(x/TAU, self.action_dim, activation_fn=tf.math.exp) # value head
-#         # Q_hat_sumexp = tf.math.reduce_logsumexp(log_pi_hat)
-#         # self.Q_hat = slim.fully_connected(x,self.action_dim,activation_fn=None) # value head
-#         # self.V_hat = TAU * tf.reduce_logsumexp(self.Q_hat/TAU, 1, keepdims=True)
-#         # self.V_hat = TAU * Q_hat_sumexp
-#
-#         # Loss
-#         self.V = tf.placeholder("float32", shape=[None,1],name='V')
-#         self.pi = tf.placeholder("float32", shape=[None,self.action_dim],name='pi')
-#         self.V_loss = tf.losses.mean_squared_error(labels=self.V,predictions=self.V_hat)
-#         self.pi_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.pi,logits=log_pi_hat)
-#         self.loss = self.V_loss + tf.reduce_mean(self.pi_loss)
-#
-#         self.lr = tf.Variable(lr,name="learning_rate",trainable=False)
-#         optimizer = tf.train.RMSPropOptimizer(learning_rate=lr)
-#         self.train_op = optimizer.minimize(self.loss)
-#
-#     def train(self,sb,Vb,pib):
-#         self.sess.run(self.train_op,feed_dict={self.x:sb,
-#                                           self.V:Vb,
-#                                           self.pi:pib})
-#
-#     def predict_V(self,s):
-#         return self.sess.run(self.V_hat,feed_dict={self.x:s})
-#
-#     def predict_pi(self,s):
-#         return self.sess.run(self.pi_hat,feed_dict={self.x:s})
-#
 ##### MCTS functions #####
       
 class Action():
     ''' Action object '''
-    def __init__(self,index,parent_state,Q_init=0.0):
+    def __init__(self,index,parent_state,Q_init,v_tau,p_tau,epsilon):
         self.index = index
         self.parent_state = parent_state
         self.W = 0.0
         self.n = 0
         self.Q = Q_init
+        self.v_tau = v_tau
+        self.p_tau = p_tau
+        self.epsilon = epsilon
                 
     def add_child_state(self,s1,r,terminal,model):
-        self.child_state = State(s1,r,terminal,self,self.parent_state.na,model)
+        self.child_state = State(s1,r,terminal,self,self.parent_state.na,model,self.v_tau,self.p_tau,self.epsilon)
         return self.child_state
         
     def update(self,R):
@@ -123,7 +62,7 @@ class Action():
 class State():
     ''' State object '''
 
-    def __init__(self,index,r,terminal,parent_action,na,model):
+    def __init__(self,index,r,terminal,parent_action,na,model,v_tau,p_tau,epsilon):
         ''' Initialize a new state '''
         self.index = np.array(index) # state
         self.r = r # reward upon arriving in this state
@@ -131,11 +70,14 @@ class State():
         self.parent_action = parent_action
         self.n = 0
         self.model = model
+        self.v_tau = v_tau
+        self.p_tau = p_tau
+        self.epsilon = epsilon
         
         self.evaluate()
         # Child actions
         self.na = na
-        self.child_actions = [Action(a,parent_state=self,Q_init=self.V) for a in range(na)]
+        self.child_actions = [Action(a,parent_state=self,Q_init=self.V,v_tau=self.v_tau,p_tau=self.p_tau,epsilon=self.epsilon) for a in range(na)]
         # self.child_actions = [Action(a, parent_state=self, Q_init=self.Q[a]) for a in range(na)]
         # self.priors = model.predict_pi(index[None,]).flatten()
         # self.child_actions = [Action(a,parent_state=self,Q_init=self.priors[a]) for a in range(na)]
@@ -149,19 +91,19 @@ class State():
         # winner = argmax(UCT)
         # return self.child_actions[winner]
 
-        epsilon = EPSILON
+        # epsilon = EPSILON
         # seed(1)
         random = rand()
         Qs = np.array([child_action.Q for child_action in self.child_actions])
         mean_Q = np.mean(Qs)
-        UCT = np.array([prior * np.exp((child_action.Q - mean_Q) /P_TAU) for child_action, prior in zip(self.child_actions, self.priors)])
-        # UCT = np.array([(child_action.Q - mean_Q)/P_TAU for child_action in self.child_actions])
+        # UCT = np.array([prior * np.exp((child_action.Q - mean_Q) /P_TAU) for child_action, prior in zip(self.child_actions, self.priors)])
+        UCT = np.array([(child_action.Q - mean_Q)/self.p_tau for child_action in self.child_actions])
         # UCT = UCT/np.sum(UCT)
         UCT = softmax(UCT)
         UCT = np.squeeze(UCT)
         # UCT = UCT/np.sum(UCT)
         # UCT = UCT/np.sum(np.exp([child_action.Q for child_action in zip(self.child_actions)]))
-        para_lambda = epsilon * self.na / np.log(self.n + 2)
+        para_lambda = self.epsilon * self.na / np.log(self.n + 2)
         # para_lambda = epsilon * self.na / (self.n + 1)
 
 
@@ -200,11 +142,11 @@ class State():
         self.Q = self.model(self.index)
         mean_Q = np.mean(self.Q.detach().cpu().numpy())
 
-        self.V = mean_Q + V_TAU_NET * logsumexp((self.Q.detach().cpu().numpy() - mean_Q)/V_TAU_NET)
+        self.V = mean_Q + self.v_tau * logsumexp((self.Q.detach().cpu().numpy() - mean_Q)/self.v_tau)
 
         # self.V = np.mean(self.Q.detach().cpu().numpy())
 
-        self.priors = softmax(self.Q.detach().cpu().numpy()/P_TAU_NET)
+        self.priors = softmax(self.Q.detach().cpu().numpy()/self.p_tau)
         self.index = self.index.detach().cpu()
 
 
@@ -214,30 +156,36 @@ class State():
         Qs = np.array([child_action.Q for child_action in self.child_actions])
         mean_Q = np.mean(Qs)
         # Q_exp = np.array([np.exp((child_action.Q - max_Q)/TAU) for child_action, prior in zip(self.child_actions, self.priors)])
-        Q_exp = np.array([(child_action.Q - mean_Q)/V_TAU for child_action in self.child_actions])
+        Q_exp = np.array([(child_action.Q - mean_Q)/self.v_tau for child_action in self.child_actions])
 
-        self.V = mean_Q + V_TAU * logsumexp(Q_exp)
+        self.V = mean_Q + self.v_tau * logsumexp(Q_exp)
         # self.V = TAU * np.mean(Q_exp)
         # self.priors = softmax(Q_exp)
         
 class MCTS():
     ''' MCTS object '''
 
-    def __init__(self,root,root_index,model,na,gamma):
+    def __init__(self,root,root_index,model,na,gamma,v_tau,p_tau,epsilon):
         self.root = None
         self.root_index = root_index
         self.model = model
         self.na = na
         self.gamma = gamma
+        self.v_tau = v_tau
+        self.p_tau = p_tau
+        self.epsilon = epsilon
+
     
     def search(self,n_mcts,c,Env,mcts_env):
         ''' Perform the MCTS search from the root '''
         if self.root is None:
-            self.root = State(self.root_index,r=0.0,terminal=False,parent_action=None,na=self.na,model=self.model) # initialize new root
+            self.root = State(self.root_index,r=0.0,terminal=False,parent_action=None,na=self.na,model=self.model,
+                              v_tau=self.v_tau,p_tau=self.p_tau,epsilon=self.epsilon) # initialize new root
         else:
             self.root.parent_action = None # continue from current root
         if self.root.terminal:
-            raise(ValueError("Can't do tree search from a terminal state"))
+            return
+            # raise(ValueError("Can't do tree search from a terminal state"))
 
         is_atari = is_atari_game(Env)
         if is_atari:
@@ -253,6 +201,8 @@ class MCTS():
             while not state.terminal: 
                 action = state.select(c=c)
                 s1,r,t,_ = mcts_env.step(action.index)
+                # if t:
+                #     break
                 if hasattr(action,'child_state'):
                     state = action.child_state # select
                     continue
@@ -280,7 +230,7 @@ class MCTS():
         # V_target = np.sum((counts/np.sum(counts))*Q)[None]
         # V_target = np.log(np.sum(np.exp(Q/TAU)))[None]
         #V_target = max_Q + TAU * np.log(np.sum((counts/np.sum(counts)) * np.exp(Q - max_Q/TAU)))[None]
-        V_target = mean_Q + V_TAU * logsumexp(Q/V_TAU)[None]
+        V_target = mean_Q + self.v_tau * logsumexp(Q/self.v_tau)[None]
         # V_target = TAU * np.mean(Q/TAU)[None]
         return self.root.index,pi_target,V_target
     
@@ -299,7 +249,7 @@ class MCTS():
             self.root = self.root.child_actions[a].child_state
 
 #### Agent ##
-def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hidden_layers,n_hidden_units):
+def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hidden_layers,n_hidden_units,v_tau,p_tau,epsilon):
     ''' Outer training loop '''
     #tf.reset_default_graph()
     episode_returns = [] # storage
@@ -314,9 +264,9 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     # model = Model(Env=Env,lr=lr,n_hidden_layers=n_hidden_layers,n_hidden_units=n_hidden_units)
 
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
-    weights = np.load('./weights-exp-0-38.npy')
+    # weights = np.load('./weights-exp-0-38.npy')
     # weights = np.array(rand(1687206))
-    # weights = np.load('./weights-exp-0-25.npy')
+    weights = np.load('./weights-exp-0-25.npy')
 
     set_weights(model.parameters(), weights, True)
 
@@ -338,7 +288,7 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
                 mcts_env.reset()
                 mcts_env.seed(seed)                                
 
-            mcts = MCTS(root_index=s,root=None,model=model,na=Env.info.action_space.n,gamma=gamma) # the object responsible for MCTS searches
+            mcts = MCTS(root_index=s,root=None,model=model,na=Env.info.action_space.n,gamma=gamma,v_tau=v_tau,p_tau=p_tau,epsilon=epsilon) # the object responsible for MCTS searches
             for t in range(max_ep_len):
                 # MCTS step
                 mcts.search(n_mcts=n_mcts,c=c,Env=Env,mcts_env=mcts_env) # perform a forward search
@@ -381,12 +331,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
     parser.add_argument('--n_ep', type=int, default=2, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=32, help='Number of MCTS traces per step')
-    parser.add_argument('--v_tau', type=float, default=0.1, help='Value Tau')
-    parser.add_argument('--p_tau', type=float, default=0.1, help='Policy Tau')
-    parser.add_argument('--epsilon', type=float, default=1.0, help='Epsilon')
-    parser.add_argument('--v_tau_net', type=float, default=0.1, help='Value Tau Network')
-    parser.add_argument('--p_tau_net', type=float, default=0.1, help='Policy Tau Network')
+    parser.add_argument('--n_mcts', type=int, default=500, help='Number of MCTS traces per step')
+    parser.add_argument('--v_tau', type=float, default=.02, help='Value Tau')
+    parser.add_argument('--p_tau', type=float, default=.02, help='Policy Tau')
+    parser.add_argument('--epsilon', type=float, default=.2, help='Epsilon')
 
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
@@ -405,7 +353,8 @@ if __name__ == '__main__':
     episode_returns,timepoints,a_best,seed_best,R_best = agent(game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
                                         max_ep_len=args.max_ep_len,lr=args.lr,c=args.c,gamma=args.gamma,
                                         data_size=args.data_size,batch_size=args.batch_size,temp=args.temp,
-                                        n_hidden_layers=args.n_hidden_layers,n_hidden_units=args.n_hidden_units)
+                                        n_hidden_layers=args.n_hidden_layers,n_hidden_units=args.n_hidden_units,
+                                        v_tau=args.v_tau,p_tau=args.p_tau,epsilon=args.epsilon)
 
     # Finished training: Visualize
     # fig,ax = plt.subplots(1,figsize=[7,5])
@@ -416,13 +365,13 @@ if __name__ == '__main__':
     # ax.set_xlabel('Episode',color='darkred')
     # plt.savefig(os.getcwd()+'/learning_curve.png',bbox_inches="tight",dpi=300)
 
-    filename = os.getcwd() +  '/' + args.game + '_ments.txt_' + str(args.v_tau) + '_' + str(args.p_tau) + '_' + str(args.epsilon)
-    file = open(filename,"w+")
-
-    for reward in episode_returns:
-        file.write(str(reward) + "\n")
-
-    file.close()
+    # filename = os.getcwd() +  '/logs/' + args.game + '_ments.txt_' + str(args.v_tau) + '_' + str(args.p_tau) + '_' + str(args.epsilon)
+    # file = open(filename,"w+")
+    #
+    # for reward in episode_returns:
+    #     file.write(str(reward) + "\n")
+    #
+    # file.close()
     
 #    print('Showing best episode with return {}'.format(R_best))
 #    Env = make_game(args.game)

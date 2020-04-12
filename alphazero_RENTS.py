@@ -35,7 +35,7 @@ from dqn_net import Network
 from set_weights import set_weights
 
 
-TAU = .015
+TAU = .06
 #### Neural Networks ##
 class Model():
     
@@ -136,13 +136,13 @@ class State():
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
 
-        UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
-        # UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
-        winner = argmax(UCT)
-        return self.child_actions[winner]
+        # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
+        # # UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
+        # winner = argmax(UCT)
+        # return self.child_actions[winner]
 
         # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
-        epsilon = .5
+        epsilon = 2.0
         # seed(1)
         random = rand()
         Qs = np.array([child_action.Q for child_action in self.child_actions])
@@ -158,17 +158,21 @@ class State():
 
         UCT = [prior * np.exp((child_action.Q - mean_Q) / TAU) for child_action, prior in zip(self.child_actions, self.priors)]
         # UCT = np.array([np.exp(child_action.Q/TAU) for child_action in self.child_actions])
-        UCT = UCT/np.sum(UCT)
+        # UCT = UCT/np.sum(UCT)
         UCT = np.squeeze(UCT)
         # UCT = self.priors * UCT
-        # UCT = softmax(UCT)
+        UCT = softmax(UCT)
+        # UCT = np.squeeze(UCT)
         # UCT = UCT/np.sum(np.exp([child_action.Q for child_action in zip(self.child_actions)]))
         para_lambda = epsilon * self.na / np.log(self.n + 2)
-        winner = np.random.randint(self.na)
+        # para_lambda = 0.1
+        winner = 0.0
         # xk = np.arange(self.na)
         # softmax = stats.rv_discrete(name='softmax', values=(xk, UCT))
         if random > para_lambda:
-            winner = sample_discrete(UCT)
+            winner = np.random.choice(len(self.child_actions), p=UCT)
+        else:
+            winner = np.random.randint(self.na)
 
         return self.child_actions[winner]
 
@@ -299,8 +303,10 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     # model = Model(Env=Env,lr=lr,n_hidden_layers=n_hidden_layers,n_hidden_units=n_hidden_units)
 
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
-    weights = np.load('./weights-exp-0-38.npy')
+    # weights = np.load('./weights-exp-0-38.npy')
     # weights = np.array(rand(1687206))
+    weights = np.load('./weights-exp-0-25.npy')
+
     set_weights(model.parameters(), weights, True)
 
     t_total = 0 # total steps   
@@ -362,8 +368,8 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
-    parser.add_argument('--n_ep', type=int, default=10, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=32, help='Number of MCTS traces per step')
+    parser.add_argument('--n_ep', type=int, default=2, help='Number of episodes')
+    parser.add_argument('--n_mcts', type=int, default=50, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--c', type=float, default=1.5, help='UCT constant')
