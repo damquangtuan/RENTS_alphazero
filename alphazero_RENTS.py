@@ -11,7 +11,6 @@ from scipy.special import softmax
 from numpy.random import seed
 from numpy.random import rand
 from scipy import stats
-import tensorflow as tf
 # import tensorflow.contrib.slim as slim
 import tf_slim as slim
 import argparse
@@ -35,61 +34,7 @@ from dqn_net import Network
 from set_weights import set_weights
 
 
-TAU = .06
-#### Neural Networks ##
-class Model():
-    
-    def __init__(self,Env,lr,n_hidden_layers,n_hidden_units):
-        # Check the Gym environment
-        self.action_dim, self.action_discrete  = check_space(Env.action_space)
-        self.state_dim, self.state_discrete  = check_space(Env.observation_space)
-        if not self.action_discrete: 
-            raise ValueError('Continuous action space not implemented')
-        
-        # Placeholders
-        if not self.state_discrete:
-            self.x = x = tf.placeholder("float32", shape=np.append(None,self.state_dim),name='x') # state 
-        else:
-            self.x = x = tf.placeholder("int32", shape=np.append(None,1)) # state
-            x =  tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
-
-        # Feedforward: Can be modified to any representation function, e.g. convolutions, residual networks, etc.
-        for i in range(n_hidden_layers):
-            x = slim.fully_connected(x,n_hidden_units,activation_fn=tf.nn.elu)
-            
-        # Output
-        # tau=0.03
-        log_pi_hat = slim.fully_connected(x,self.action_dim,activation_fn=None)
-        self.pi_hat = tf.nn.softmax(log_pi_hat) # policy head           
-        self.V_hat = slim.fully_connected(x,1,activation_fn=None) # value head
-        # self.Q_hat_exp = slim.fully_connected(x/TAU, self.action_dim, activation_fn=tf.math.exp) # value head
-        # Q_hat_sumexp = tf.math.reduce_logsumexp(log_pi_hat)
-        # self.Q_hat = slim.fully_connected(x,self.action_dim,activation_fn=None) # value head
-        # self.V_hat = TAU * tf.reduce_logsumexp(self.Q_hat/TAU, 1, keepdims=True)
-        # self.V_hat = TAU * tf.math.log(tf.reduce_sum(self.p_previous * self.Q_hat_exp, 1, keepdims=True))
-        # self.V_hat = TAU * Q_hat_sumexp
-
-        # Loss
-        self.V = tf.placeholder("float32", shape=[None,1],name='V')
-        self.pi = tf.placeholder("float32", shape=[None,self.action_dim],name='pi')
-        self.V_loss = tf.losses.mean_squared_error(labels=self.V,predictions=self.V_hat)
-        self.pi_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.pi,logits=log_pi_hat)
-        self.loss = self.V_loss + tf.reduce_mean(self.pi_loss)
-        
-        self.lr = tf.Variable(lr,name="learning_rate",trainable=False)
-        optimizer = tf.train.RMSPropOptimizer(learning_rate=lr)
-        self.train_op = optimizer.minimize(self.loss)
-    
-    def train(self,sb,Vb,pib):
-        self.sess.run(self.train_op,feed_dict={self.x:sb,
-                                          self.V:Vb,
-                                          self.pi:pib})
-    
-    def predict_V(self,s):
-        return self.sess.run(self.V_hat,feed_dict={self.x:s})
-        
-    def predict_pi(self,s):
-        return self.sess.run(self.pi_hat,feed_dict={self.x:s})
+TAU = .2
    
 ##### MCTS functions #####
       
@@ -99,7 +44,7 @@ class Action():
         self.index = index
         self.parent_state = parent_state
         self.W = 0.0
-        self.n = 0
+        self.n = 1
         self.Q = Q_init
                 
     def add_child_state(self,s1,r,terminal,model):
@@ -120,55 +65,32 @@ class State():
         self.r = r # reward upon arriving in this state
         self.terminal = terminal # whether the domain terminated in this state
         self.parent_action = parent_action
-        self.n = 0
+        self.n = 1
         self.model = model
         
         self.evaluate()
         # Child actions
         self.na = na
         self.child_actions = [Action(a,parent_state=self,Q_init=self.V) for a in range(na)]
-        # self.priors = model.predict_pi(index[None,]).flatten()
-        # self.child_actions = [Action(a,parent_state=self,Q_init=self.priors[a]) for a in range(na)]
-        # self.priors = np.array([child_action.n for child_action in self.child_actions])
 
-
-    
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
 
-        # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
-        # # UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
-        # winner = argmax(UCT)
-        # return self.child_actions[winner]
-
-        # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
-        epsilon = 2.0
-        # seed(1)
+        epsilon = 1.0
         random = rand()
         Qs = np.array([child_action.Q for child_action in self.child_actions])
-        # self.priors = np.array([child_action.n for child_action in self.child_actions])
-        #
-        sum = np.sum(self.priors)
-        if sum == 0:
-            self.priors = np.array([1/6, 1/6, 1/6, 1/6, 1/6, 1/6])
-        # self.priors = self.priors / np.sum(self.priors)
-        # self.priors = softmax(Qs/TAU)
+        self.priors = np.array([child_action.n for child_action in self.child_actions])
+
         mean_Q = np.mean(Qs)
-        # counts = np.array([child_action.n for child_action in self.child_actions])
 
         UCT = [prior * np.exp((child_action.Q - mean_Q) / TAU) for child_action, prior in zip(self.child_actions, self.priors)]
         # UCT = np.array([np.exp(child_action.Q/TAU) for child_action in self.child_actions])
-        # UCT = UCT/np.sum(UCT)
+        UCT = UCT/np.sum(UCT)
         UCT = np.squeeze(UCT)
-        # UCT = self.priors * UCT
-        UCT = softmax(UCT)
-        # UCT = np.squeeze(UCT)
-        # UCT = UCT/np.sum(np.exp([child_action.Q for child_action in zip(self.child_actions)]))
-        para_lambda = epsilon * self.na / np.log(self.n + 2)
-        # para_lambda = 0.1
+
+        para_lambda = epsilon * self.na / np.log(self.n + 1)
         winner = 0.0
-        # xk = np.arange(self.na)
-        # softmax = stats.rv_discrete(name='softmax', values=(xk, UCT))
+
         if random > para_lambda:
             winner = np.random.choice(len(self.child_actions), p=UCT)
         else:
@@ -185,8 +107,7 @@ class State():
         Q = self.model(self.index)
 
         mean_Q = np.mean(Q.detach().cpu().numpy())
-        # self.priors = np.array([1/self.na for _ in range(self.na)])
-        # self.priors = np.array([1/6, 1/6, 1/6, 1/6, 1/6, 1/6])
+
         UCT = np.exp((Q.detach().cpu().numpy() - mean_Q)/TAU)
         self.V = mean_Q + TAU * np.log(np.mean(UCT))
 
@@ -199,11 +120,8 @@ class State():
         ''' update count on backward pass '''
         self.n += 1
         Q = np.array([child_action.Q for child_action in self.child_actions])
-
         mean_Q = np.mean(Q)
-
         counts = np.array([child_action.n for child_action in self.child_actions])
-
         self.V = mean_Q + TAU*np.log(np.sum((counts/np.sum(counts))*np.exp((Q - mean_Q)/TAU)))[None]
 
 
@@ -228,7 +146,7 @@ class MCTS():
         else:
             self.root.parent_action = None # continue from current root
         if self.root.terminal:
-            raise(ValueError("Can't do tree search from a terminal state"))
+            return
 
         is_atari = is_atari_game(Env)
         if is_atari:
@@ -244,6 +162,8 @@ class MCTS():
             while not state.terminal: 
                 action = state.select(c=c)
                 s1,r,t,_ = mcts_env.step(action.index)
+                r = r/7.0 #to scale reward to [0,1] in Breakout
+
                 if hasattr(action,'child_state'):
                     state = action.child_state # select
                     continue
@@ -266,10 +186,7 @@ class MCTS():
         Q = np.array([child_action.Q for child_action in self.root.child_actions])
         mean_Q = np.mean(Q)
         pi_target = stable_normalizer(counts,temp)
-        # V_target = np.sum((counts/np.sum(counts))*Q)[None]
-        # V_target = np.log(np.sum(np.exp(Q/TAU)))[None]
-        # priors = self.root.getPriors()
-        # V_target = max_Q + TAU * np.log(np.sum((counts/np.sum(counts)) * np.exp(Q - max_Q/TAU)))[None]
+
         V_target = mean_Q + TAU * np.log(np.sum(counts/np.sum(counts) * np.exp((Q - mean_Q)/TAU)))[None]
         return self.root.index,pi_target,V_target
     
@@ -283,7 +200,7 @@ class MCTS():
             # print('Warning: this domain seems stochastic. Not re-using the subtree for next search. '+
             #       'To deal with stochastic environments, implement progressive widening.')
             self.root = None
-            self.root_index = s1            
+            self.root_index = s1
         else:
             self.root = self.root.child_actions[a].child_state
 
@@ -297,15 +214,11 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     Env = Atari(game)
     is_atari = is_atari_game(Env)
     mcts_env = Atari(game)
-    # if is_atari else None
-
-    # D = Database(max_size=data_size,batch_size=batch_size)
-    # model = Model(Env=Env,lr=lr,n_hidden_layers=n_hidden_layers,n_hidden_units=n_hidden_units)
 
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
-    # weights = np.load('./weights-exp-0-38.npy')
+    # weights = np.load('./weights-exp-0-38.npy') #Pong
     # weights = np.array(rand(1687206))
-    weights = np.load('./weights-exp-0-25.npy')
+    weights = np.load('./weights-exp-0-25.npy') #breakout
 
     set_weights(model.parameters(), weights, True)
 
@@ -355,11 +268,7 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
                 seed_best = seed
                 R_best = R
             print('Finished episode {}, total return: {}, total time: {} sec'.format(ep,np.round(R,2),np.round((time.time()-start),1)))
-            # Train
-            # D.reshuffle()
-            # for epoch in range(1):
-            #     for sb,Vb,pib in D:
-            #         model.train(sb,Vb,pib)
+
     # Return results
     return episode_returns, timepoints, a_best, seed_best, R_best
 
@@ -369,7 +278,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
     parser.add_argument('--n_ep', type=int, default=2, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=50, help='Number of MCTS traces per step')
+    parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--c', type=float, default=1.5, help='UCT constant')
@@ -406,12 +315,3 @@ if __name__ == '__main__':
         file.write(str(reward) + "\n")
 
     file.close()
-    
-#    print('Showing best episode with return {}'.format(R_best))
-#    Env = make_game(args.game)
-#    Env = wrappers.Monitor(Env,os.getcwd() + '/best_episode',force=True)
-#    Env.reset()
-#    Env.seed(seed_best)
-#    for a in a_best:
-#        Env.step(a)
-#        Env.render()

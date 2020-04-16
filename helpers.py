@@ -21,6 +21,8 @@ def sample_discrete(probabilities):
     return count
 
 def stable_normalizer(x,temp):
+    if np.sum(x) == 0:
+        x[0] = 1
     ''' Computes x[i]**temp/sum_i(x[i]**temp) '''
     x = (x / np.max(x))**temp
     return np.abs(x/np.sum(x))

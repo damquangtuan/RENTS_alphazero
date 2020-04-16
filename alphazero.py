@@ -35,7 +35,7 @@ class Model():
         if not self.state_discrete:
             self.x = x = tf.placeholder("float32", shape=np.append(None,self.state_dim),name='x') # state  
         else:
-            self.x = x = tf.placeholder("int32", shape=np.append(None,1)) # state
+            self.x = x = tf.placeholder("int32", shape=np.append(None,1), name='x') # state
             x = tf.squeeze(tf.one_hot(x,self.state_dim,axis=1),axis=2)
         
         # Feedforward: Can be modified to any representation function, e.g. convolutions, residual networks, etc. 
@@ -105,7 +105,11 @@ class State():
         # Child actions
         self.na = na
         self.child_actions = [Action(a,parent_state=self,Q_init=self.V) for a in range(na)]
-        self.priors = model.predict_pi(index[None,]).flatten()
+        if not self.model.state_discrete:
+            self.priors = model.predict_pi(index[None,]).flatten()
+        else:
+            index = np.reshape(index, (1, -1))
+            self.priors = model.predict_pi(index).flatten()
     
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
@@ -115,14 +119,17 @@ class State():
 
     def evaluate(self):
         ''' Bootstrap the state value '''
-        self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)          
-
+        if not self.model.state_discrete:
+            self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
+        else:
+            index = np.reshape(self.index, (1, -1))
+            self.V = np.squeeze(self.model.predict_V(index)) if not self.terminal else np.array(0.0)
     def update(self):
         ''' update count on backward pass '''
         self.n += 1
-        UCT = np.array([child_action.Q for child_action in self.child_actions])
-        counts = np.array([child_action.n for child_action in self.child_actions])
-        self.V = np.sum((counts/np.sum(counts))*UCT)
+        # UCT = np.array([child_action.Q for child_action in self.child_actions])
+        # counts = np.array([child_action.n for child_action in self.child_actions])
+        # self.V = np.sum((counts/np.sum(counts))*UCT)
 
         
 class MCTS():
@@ -216,7 +223,7 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
         sess.run(tf.global_variables_initializer())
         for ep in range(n_ep):    
             start = time.time()
-            s = Env.reset() 
+            s = Env.reset()
             R = 0.0 # Total return counter
             a_store = []
             seed = np.random.randint(1e7) # draw some Env seed
@@ -268,7 +275,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--game', default='CartPole-v0',help='Training environment')
     parser.add_argument('--n_ep', type=int, default=500, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
+    parser.add_argument('--n_mcts', type=int, default=32, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--c', type=float, default=1.5, help='UCT constant')

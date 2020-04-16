@@ -86,13 +86,6 @@ class State():
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
 
-        # UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action, prior in zip(self.child_actions,self.priors)])
-        # # UCT = np.array([child_action.Q + c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action in self.child_actions])
-        # winner = argmax(UCT)
-        # return self.child_actions[winner]
-
-        # epsilon = EPSILON
-        # seed(1)
         random = rand()
         Qs = np.array([child_action.Q for child_action in self.child_actions])
         mean_Q = np.mean(Qs)
@@ -101,34 +94,14 @@ class State():
         # UCT = UCT/np.sum(UCT)
         UCT = softmax(UCT)
         UCT = np.squeeze(UCT)
-        # UCT = UCT/np.sum(UCT)
-        # UCT = UCT/np.sum(np.exp([child_action.Q for child_action in zip(self.child_actions)]))
+
         para_lambda = self.epsilon * self.na / np.log(self.n + 2)
-        # para_lambda = epsilon * self.na / (self.n + 1)
 
 
-        # prob = (1 - para_lambda) * UCT + para_lambda / self.na
-
-        # winner = argmax(prob)
-        # winner = np.random.choice(len(UCT), p=UCT)
-        # winner = sample_discrete(UCT)
-
-        winner = np.random.randint(self.na)
-        # xk = np.arange(self.na)
-        # softmax = stats.rv_discrete(name='softmax', values=(xk, UCT))
-        # if self.n % 2 == 0:
-        #     winner = np.random.choice(len(self.child_actions), p=UCT)
-        # else:
-        #     winner = np.random.randint(self.na)
-        # return self.child_actions[winner]
+        winner = 0
 
         if random > para_lambda:
-            # distrib = rv_discrete(values=(range(len(self.child_actions)), UCT))
-            # winner = int(distrib.rvs(size=1))
-
             winner = np.random.choice(len(self.child_actions), p=UCT)
-            # winner = sample_discrete(UCT)
-            # winner = argmax(UCT)
         else:
             winner = np.random.randint(self.na)
         return self.child_actions[winner]
@@ -142,11 +115,9 @@ class State():
         self.Q = self.model(self.index)
         mean_Q = np.mean(self.Q.detach().cpu().numpy())
 
-        self.V = mean_Q + self.v_tau * logsumexp((self.Q.detach().cpu().numpy() - mean_Q)/self.v_tau)
+        self.V = mean_Q + self.v_tau * logsumexp((self.Q.detach().cpu().numpy() - mean_Q) / (self.v_tau))
 
-        # self.V = np.mean(self.Q.detach().cpu().numpy())
-
-        self.priors = softmax(self.Q.detach().cpu().numpy()/self.p_tau)
+        self.priors = softmax(self.Q.detach().cpu().numpy() / (self.p_tau))
         self.index = self.index.detach().cpu()
 
 
@@ -155,12 +126,9 @@ class State():
         self.n += 1
         Qs = np.array([child_action.Q for child_action in self.child_actions])
         mean_Q = np.mean(Qs)
-        # Q_exp = np.array([np.exp((child_action.Q - max_Q)/TAU) for child_action, prior in zip(self.child_actions, self.priors)])
         Q_exp = np.array([(child_action.Q - mean_Q)/self.v_tau for child_action in self.child_actions])
 
         self.V = mean_Q + self.v_tau * logsumexp(Q_exp)
-        # self.V = TAU * np.mean(Q_exp)
-        # self.priors = softmax(Q_exp)
         
 class MCTS():
     ''' MCTS object '''
@@ -201,8 +169,8 @@ class MCTS():
             while not state.terminal: 
                 action = state.select(c=c)
                 s1,r,t,_ = mcts_env.step(action.index)
-                # if t:
-                #     break
+                r = r/7.0
+
                 if hasattr(action,'child_state'):
                     state = action.child_state # select
                     continue
@@ -225,13 +193,9 @@ class MCTS():
         Q = np.array([child_action.Q for child_action in self.root.child_actions])
         mean_Q = np.mean(Q)
         Q = np.array([(child_action.Q - mean_Q) for child_action in self.root.child_actions])
-        # pi_target = softmax(Q)
         pi_target = stable_normalizer(counts,temp)
-        # V_target = np.sum((counts/np.sum(counts))*Q)[None]
-        # V_target = np.log(np.sum(np.exp(Q/TAU)))[None]
-        #V_target = max_Q + TAU * np.log(np.sum((counts/np.sum(counts)) * np.exp(Q - max_Q/TAU)))[None]
+
         V_target = mean_Q + self.v_tau * logsumexp(Q/self.v_tau)[None]
-        # V_target = TAU * np.mean(Q/TAU)[None]
         return self.root.index,pi_target,V_target
     
     def forward(self,a,s1):
@@ -258,15 +222,11 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     Env = Atari(game)
     is_atari = is_atari_game(Env)
     mcts_env = Atari(game)
-    # if is_atari else None
-
-    # D = Database(max_size=data_size,batch_size=batch_size)
-    # model = Model(Env=Env,lr=lr,n_hidden_layers=n_hidden_layers,n_hidden_units=n_hidden_units)
 
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
-    # weights = np.load('./weights-exp-0-38.npy')
+    # weights = np.load('./weights-exp-0-38.npy') #Pong
     # weights = np.array(rand(1687206))
-    weights = np.load('./weights-exp-0-25.npy')
+    weights = np.load('./weights-exp-0-25.npy') #breakout
 
     set_weights(model.parameters(), weights, True)
 
@@ -317,11 +277,7 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
                 seed_best = seed
                 R_best = R
             print('Finished episode {}, total return: {}, total time: {} sec'.format(ep,np.round(R,2),np.round((time.time()-start),1)))
-            # Train
-            # D.reshuffle()
-            # for epoch in range(1):
-            #     for sb,Vb,pib in D:
-            #         model.train(sb,Vb,pib)
+
     # Return results
     return episode_returns, timepoints, a_best, seed_best, R_best
 
@@ -365,13 +321,13 @@ if __name__ == '__main__':
     # ax.set_xlabel('Episode',color='darkred')
     # plt.savefig(os.getcwd()+'/learning_curve.png',bbox_inches="tight",dpi=300)
 
-    # filename = os.getcwd() +  '/logs/' + args.game + '_ments.txt_' + str(args.v_tau) + '_' + str(args.p_tau) + '_' + str(args.epsilon)
-    # file = open(filename,"w+")
-    #
-    # for reward in episode_returns:
-    #     file.write(str(reward) + "\n")
-    #
-    # file.close()
+    filename = os.getcwd() +  '/logs/' + args.game + '_ments.txt_' + str(args.v_tau) + '_' + str(args.p_tau) + '_' + str(args.epsilon)
+    file = open(filename,"w+")
+
+    for reward in episode_returns:
+        file.write(str(reward) + "\n")
+
+    file.close()
     
 #    print('Showing best episode with return {}'.format(R_best))
 #    Env = make_game(args.game)
