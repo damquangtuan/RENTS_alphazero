@@ -78,9 +78,6 @@ class State():
         # Child actions
         self.na = na
         self.child_actions = [Action(a,parent_state=self,Q_init=self.V,v_tau=self.v_tau,p_tau=self.p_tau,epsilon=self.epsilon) for a in range(na)]
-        # self.child_actions = [Action(a, parent_state=self, Q_init=self.Q[a]) for a in range(na)]
-        # self.priors = model.predict_pi(index[None,]).flatten()
-        # self.child_actions = [Action(a,parent_state=self,Q_init=self.priors[a]) for a in range(na)]
 
     
     def select(self,c=1.5):
@@ -89,14 +86,11 @@ class State():
         random = rand()
         Qs = np.array([child_action.Q for child_action in self.child_actions])
         mean_Q = np.mean(Qs)
-        # UCT = np.array([prior * np.exp((child_action.Q - mean_Q) /P_TAU) for child_action, prior in zip(self.child_actions, self.priors)])
         UCT = np.array([(child_action.Q - mean_Q)/self.p_tau for child_action in self.child_actions])
-        # UCT = UCT/np.sum(UCT)
         UCT = softmax(UCT)
         UCT = np.squeeze(UCT)
 
         para_lambda = self.epsilon * self.na / np.log(self.n + 2)
-
 
         winner = 0
 
@@ -328,12 +322,3 @@ if __name__ == '__main__':
         file.write(str(reward) + "\n")
 
     file.close()
-    
-#    print('Showing best episode with return {}'.format(R_best))
-#    Env = make_game(args.game)
-#    Env = wrappers.Monitor(Env,os.getcwd() + '/best_episode',force=True)
-#    Env.reset()
-#    Env.seed(seed_best)
-#    for a in a_best:
-#        Env.step(a)
-#        Env.render()
