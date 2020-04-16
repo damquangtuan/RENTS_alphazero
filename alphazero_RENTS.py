@@ -224,50 +224,49 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
 
     t_total = 0 # total steps   
     R_best = -np.Inf
- 
-    with tf.Session() as sess:
-        model.sess = sess
-        sess.run(tf.global_variables_initializer())
-        for ep in range(n_ep):    
-            start = time.time()
-            s = Env.reset() 
-            R = 0.0 # Total return counter
-            a_store = []
-            seed = np.random.randint(1e7) # draw some Env seed
-            Env.seed(seed)      
-            if is_atari: 
-                mcts_env.reset()
-                mcts_env.seed(seed)                                
 
-            mcts = MCTS(root_index=s,root=None,model=model,na=Env.info.action_space.n,gamma=gamma) # the object responsible for MCTS searches
-            for t in range(max_ep_len):
-                # MCTS step
-                mcts.search(n_mcts=n_mcts,c=c,Env=Env,mcts_env=mcts_env) # perform a forward search
-                state,pi,V = mcts.return_results(temp) # extract the root output
-                # D.store((state,V,pi))
+    for ep in range(n_ep):
+        start = time.time()
+        s = Env.reset()
+        R = 0.0  # Total return counter
+        a_store = []
+        seed = np.random.randint(1e7)  # draw some Env seed
+        Env.seed(seed)
+        if is_atari:
+            mcts_env.reset()
+            mcts_env.seed(seed)
 
-                # Make the true step
-                a = np.random.choice(len(pi),p=pi)
-                a_store.append(a)
-                s1,r,terminal,_ = Env.step(a)
-                R += r
-                t_total += n_mcts # total number of environment steps (counts the mcts steps)                
+        mcts = MCTS(root_index=s, root=None, model=model, na=Env.info.action_space.n,
+                    gamma=gamma)  # the object responsible for MCTS searches
+        for t in range(max_ep_len):
+            # MCTS step
+            mcts.search(n_mcts=n_mcts, c=c, Env=Env, mcts_env=mcts_env)  # perform a forward search
+            state, pi, V = mcts.return_results(temp)  # extract the root output
+            # D.store((state,V,pi))
 
-                if terminal:
-                    break
-                else:
-                    mcts.forward(a,s1)
-            
-            # Finished episode
-            episode_returns.append(R) # store the total episode return
-            timepoints.append(t_total) # store the timestep count of the episode return
-            store_safely(os.getcwd(),'result',{'R':episode_returns,'t':timepoints})  
+            # Make the true step
+            a = np.random.choice(len(pi), p=pi)
+            a_store.append(a)
+            s1, r, terminal, _ = Env.step(a)
+            R += r
+            t_total += n_mcts  # total number of environment steps (counts the mcts steps)
 
-            if R > R_best:
-                a_best = a_store
-                seed_best = seed
-                R_best = R
-            print('Finished episode {}, total return: {}, total time: {} sec'.format(ep,np.round(R,2),np.round((time.time()-start),1)))
+            if terminal:
+                break
+            else:
+                mcts.forward(a, s1)
+
+        # Finished episode
+        episode_returns.append(R)  # store the total episode return
+        timepoints.append(t_total)  # store the timestep count of the episode return
+        store_safely(os.getcwd(), 'result', {'R': episode_returns, 't': timepoints})
+
+        if R > R_best:
+            a_best = a_store
+            seed_best = seed
+            R_best = R
+        print('Finished episode {}, total return: {}, total time: {} sec'.format(ep, np.round(R, 2),
+                                                                                 np.round((time.time() - start), 1)))
 
     # Return results
     return episode_returns, timepoints, a_best, seed_best, R_best
