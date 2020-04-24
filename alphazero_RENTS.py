@@ -103,7 +103,8 @@ class State():
         # self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
         self.index = np.expand_dims(self.index, 0)
         self.index = torch.from_numpy(self.index)
-        self.index = self.index.cuda() if args.use_cuda else self.index
+        if args.use_cuda:
+            self.index = self.index.cuda()
         Q = self.model(self.index)
 
         mean_Q = np.mean(Q.detach().cpu().numpy())
