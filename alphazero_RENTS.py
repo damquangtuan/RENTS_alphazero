@@ -103,7 +103,7 @@ class State():
         # self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
         self.index = np.expand_dims(self.index, 0)
         self.index = torch.from_numpy(self.index)
-        self.index = self.index.cuda()
+        self.index = self.index.cuda() if args.use_cuda else self.index
         Q = self.model(self.index)
 
         mean_Q = np.mean(Q.detach().cpu().numpy())
@@ -220,7 +220,7 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     # weights = np.array(rand(1687206))
     weights = np.load('./weights-exp-0-25.npy') #breakout
 
-    set_weights(model.parameters(), weights, True)
+    set_weights(model.parameters(), weights, args.use_cuda)
 
     t_total = 0 # total steps   
     R_best = -np.Inf
@@ -286,6 +286,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_size', type=int, default=1000, help='Dataset size (FIFO)')
     parser.add_argument('--batch_size', type=int, default=32, help='Minibatch size')
     parser.add_argument('--window', type=int, default=25, help='Smoothing window for visualization')
+    parser.add_argument('--use-cuda', action='store_true')
 
     parser.add_argument('--n_hidden_layers', type=int, default=2, help='Number of hidden layers in NN')
     parser.add_argument('--n_hidden_units', type=int, default=128, help='Number of units per hidden layers in NN')
