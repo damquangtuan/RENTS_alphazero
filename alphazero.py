@@ -261,7 +261,6 @@ class MCTS():
                 Q = [(prior * np.exp((child_action.Q - max_Q) / TAU)) for child_action, prior in
                      zip(self.root.child_actions, self.root.priors)]
 
-            # pi_target = Q / np.sum(Q)
             priors = self.root.getPriors()
             V_target = max_Q + TAU * np.log(np.sum(priors * np.exp(Q - max_Q/TAU)))[None]
         elif self.algorithm == 'ments':

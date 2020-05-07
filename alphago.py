@@ -26,38 +26,38 @@ def breakout(Env):
     model = torch.load('models/breakout.torch')
     return model
 
-def asterix(Env):
+def asterix(Env,cuda=True):
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
     weights = np.load('models/asterix.npy')
-    set_weights(model.parameters(), weights, True)
+    set_weights(model.parameters(),weights,cuda)
     return model
 
-def beam_rider(Env):
+def beam_rider(Env,cuda=True):
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
     weights = np.load('models/beam-rider.npy')
-    set_weights(model.parameters(), weights, True)
+    set_weights(model.parameters(),weights,cuda)
     return model
 
-def qbert(Env):
+def qbert(Env,cuda=True):
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
     weights = np.load('models/qbert.npy')
-    set_weights(model.parameters(), weights, True)
+    set_weights(model.parameters(), weights,cuda)
     return model
 
-def space_invaders(Env):
+def space_invaders(Env,cuda=True):
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
     weights = np.load('models/space-invaders.npy')
-    set_weights(model.parameters(), weights, True)
+    set_weights(model.parameters(), weights,cuda)
     return model
 
-def seaquest(Env):
+def seaquest(Env,cuda=True):
     model = Network(input_shape=(4, 84, 84), output_shape=(Env.info.action_space.n,))
     weights = np.load('models/seaquest.npy')
-    set_weights(model.parameters(), weights, True)
+    set_weights(model.parameters(), weights,cuda)
     return model
 
 
-def load_atari_game(argument,Env):
+def load_atari_game(argument,Env,cuda):
     switcher = {
         'BreakoutNoFrameskip-v4': breakout,
         'AsterixNoFrameskip-v4': asterix,
@@ -69,7 +69,7 @@ def load_atari_game(argument,Env):
     # Get the function from switcher dictionary
     func = switcher.get(argument, lambda: "Invalid game")
     # Execute the function
-    model = func(Env)
+    model = func(Env,cuda)
     return model
 
 ##### MCTS functions #####
@@ -166,7 +166,8 @@ class State():
         # self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
         self.index = np.expand_dims(self.index, 0)
         self.index = torch.from_numpy(self.index)
-        self.index = self.index.cuda()
+        if args.cuda:
+            self.index = self.index.cuda()
         self.Q = self.model(self.index)
         max_Q = np.max(self.Q.detach().cpu().numpy())
         uct = np.exp((self.Q.detach().cpu().numpy() - max_Q)/self.tau)
@@ -329,7 +330,7 @@ def agent(algorithm,game,n_ep,n_mcts,max_ep_len,c,p,gamma,temp,tau,epsilon):
     is_atari = is_atari_game(Env)
     mcts_env = Atari(game)
 
-    model = load_atari_game(game,Env)
+    model = load_atari_game(game,Env,args.cuda)
 
     t_total = 0 # total steps
     R_best = -np.Inf
@@ -399,13 +400,15 @@ if __name__ == '__main__':
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
     parser.add_argument('--gamma', type=float, default=0.99, help='Discount parameter')
     parser.add_argument('--number', type=int, default=1, help='Iteration number')
+    parser.add_argument('--cuda', action='store_true')
 
     args = parser.parse_args()
     episode_returns,timepoints,a_best,seed_best,R_best = agent(algorithm=args.algorithm,game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
                                         max_ep_len=args.max_ep_len,c=args.c,p=args.p,gamma=args.gamma,
                                         temp=args.temp,tau=args.tau,epsilon=args.epsilon)
 
-    filename = os.getcwd() +  '/logs_rents/' + args.game + '_rents.txt' + str(args.tau) + '_' + str(args.epsilon) + '_' + str(args.number)
+    filename = os.getcwd() + '/logs_rents/' + args.game + '_' + args.algorithm + '.txt' + str(args.tau) + '_' + \
+               str(args.epsilon) + '_' + str(args.number)
     file = open(filename,"w+")
 
     for reward in episode_returns:
