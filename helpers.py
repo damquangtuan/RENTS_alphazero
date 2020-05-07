@@ -11,6 +11,14 @@ import os
 from shutil import copyfile
 from gym import spaces
 
+
+def power(q, p):
+    result = 0
+    if q != 0:
+        result = np.power(q, p)
+
+    return result
+
 def sample_discrete(probabilities):
     v = rand()
     count = 0

@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-One-player Alpha Zero
-@author: Thomas Moerland, Delft University of Technology
+One-player Alpha go
+@author: Tuan Dam, IAS TU Darmstadt
 """
 
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import argparse
-import os
 import time
 import copy
 import os
+from numpy.random import rand
 from gym import wrappers
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 
 from helpers import (argmax,check_space,is_atari_game,copy_atari_state,store_safely,
-restore_atari_state,stable_normalizer,smooth,symmetric_remove,Database)
+restore_atari_state,stable_normalizer,smooth,symmetric_remove,Database,power)
 from rl.make_game import make_game
+
+TAU = 1
 
 #### Neural Networks ##
 class Model():
@@ -73,38 +75,49 @@ class Model():
       
 class Action():
     ''' Action object '''
-    def __init__(self,index,parent_state,Q_init=0.0):
+    def __init__(self,index,parent_state,Q_init=0.0,epsilon=0.0,algorithm='uct',p=1.0):
         self.index = index
         self.parent_state = parent_state
         self.W = 0.0
-        self.n = 0
+        self.n = 1
         self.Q = Q_init
+        self.algorithm = algorithm
+        self.p = p
+        self.epsilon = epsilon
                 
     def add_child_state(self,s1,r,terminal,model):
-        self.child_state = State(s1,r,terminal,self,self.parent_state.na,model)
+        self.child_state = State(s1,r,terminal,self,self.parent_state.na,model,epsilon=self.epsilon,
+                                 algorithm=self.algorithm,p=self.p)
         return self.child_state
         
     def update(self,R):
         self.n += 1
-        self.W += R
-        self.Q = self.W/self.n
+        if self.algorithm == 'uct' or self.algorithm == 'power-uct':
+            self.W += R
+            self.Q = self.W/self.n
+        else:
+            self.Q = R
 
 class State():
     ''' State object '''
 
-    def __init__(self,index,r,terminal,parent_action,na,model):
+    def __init__(self,index,r,terminal,parent_action,na,model,epsilon,algorithm,p=1.0):
         ''' Initialize a new state '''
         self.index = index # state
         self.r = r # reward upon arriving in this state
         self.terminal = terminal # whether the domain terminated in this state
         self.parent_action = parent_action
-        self.n = 0
+        self.n = 1
         self.model = model
+        self.epsilon = epsilon
+        self.algorithm = algorithm
+        self.p = p
         
         self.evaluate()
         # Child actions
         self.na = na
-        self.child_actions = [Action(a,parent_state=self,Q_init=self.V) for a in range(na)]
+        self.child_actions = [Action(a,parent_state=self,Q_init=self.V,epsilon=self.epsilon,algorithm=algorithm,p=p)
+                              for a in range(na)]
         if not self.model.state_discrete:
             self.priors = model.predict_pi(index[None,]).flatten()
         else:
@@ -113,8 +126,35 @@ class State():
     
     def select(self,c=1.5):
         ''' Select one of the child actions based on UCT rule '''
-        UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)]) 
-        winner = argmax(UCT)
+        winner = 0
+        if self.algorithm == 'uct' or self.algorithm == 'power-uct':
+            UCT = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior in zip(self.child_actions,self.priors)])
+            winner = argmax(UCT)
+        elif self.algorithm == 'rents':
+            random = rand()
+            Qs = np.array([child_action.Q for child_action in self.child_actions])
+            max_Q = np.max(Qs)
+            UCT = np.array([prior * np.exp((child_action.Q - max_Q) / TAU) for child_action, prior in
+                            zip(self.child_actions, self.priors)])
+            UCT = UCT / np.sum(UCT)
+            para_lambda = self.epsilon * self.na / np.log(self.n + 1)
+            if random > para_lambda:
+                winner = np.random.choice(len(self.child_actions), p=UCT)
+            else:
+                winner = np.random.randint(self.na)
+        elif self.algorithm == 'ments':
+            random = rand()
+            Qs = [child_action.Q for child_action in self.child_actions]
+            max_Q = np.max(Qs)
+            UCT = [np.exp((child_action.Q - max_Q) / self.p_tau) for child_action in self.child_actions]
+            UCT = np.squeeze(UCT)
+            UCT = UCT / np.sum(UCT)
+            para_lambda = self.epsilon * (self.na / np.log(self.n + 1))
+            if random > para_lambda:
+                winner = np.random.choice(len(self.child_actions), p=UCT)
+            else:
+                winner = np.random.randint(self.na)
+
         return self.child_actions[winner]
 
     def evaluate(self):
@@ -124,28 +164,53 @@ class State():
         else:
             index = np.reshape(self.index, (1, -1))
             self.V = np.squeeze(self.model.predict_V(index)) if not self.terminal else np.array(0.0)
+
     def update(self):
         ''' update count on backward pass '''
         self.n += 1
-        # UCT = np.array([child_action.Q for child_action in self.child_actions])
-        # counts = np.array([child_action.n for child_action in self.child_actions])
-        # self.V = np.sum((counts/np.sum(counts))*UCT)
+        counts = np.array([child_action.n for child_action in self.child_actions])
+        sum = np.sum(counts)
+        if self.algorithm == 'uct':
+            UCT = np.array([child_action.Q for child_action in self.child_actions])
+            self.V = np.sum((counts/sum)*UCT)
+        elif self.algorithm == 'power-uct':
+            self.V = 0
+            for child_action in self.child_actions:
+                self.V += (child_action.n / sum) * power(child_action.Q, self.p)
+            self.V = power(self.V, 1 / self.p)
+        elif self.algorithm == 'rents':
+            self.Qs = np.array([child_action.Q for child_action in self.child_actions])
+            max_Q = np.max(self.Qs)
+            self.priors = self.model.predict_pi(self.index[None,]).flatten()
+            UCT = np.array([prior * np.exp((child_action.Q - max_Q) / TAU) for child_action, prior in
+                            zip(self.child_actions, self.priors)])
+            self.V = max_Q + TAU * np.log(np.sum(UCT))
+        elif self.algorithm == 'ments':
+            self.Qs = np.array([child_action.Q for child_action in self.child_actions])
+            max_Q = np.max(self.Qs)
+            Q_exp = np.array([np.exp((child_action.Q - max_Q) / TAU) for child_action, prior in
+                              zip(self.child_actions, self.priors)])
+            self.V = max_Q + TAU * np.log(np.sum(Q_exp))
 
         
 class MCTS():
     ''' MCTS object '''
 
-    def __init__(self,root,root_index,model,na,gamma):
+    def __init__(self,root,root_index,model,na,gamma,epsilon,algorithm,p=1.0):
         self.root = None
         self.root_index = root_index
         self.model = model
         self.na = na
         self.gamma = gamma
+        self.epsilon = epsilon
+        self.algorithm=algorithm
+        self.p = p
     
     def search(self,n_mcts,c,Env,mcts_env):
         ''' Perform the MCTS search from the root '''
         if self.root is None:
-            self.root = State(self.root_index,r=0.0,terminal=False,parent_action=None,na=self.na,model=self.model) # initialize new root
+            self.root = State(self.root_index,r=0.0,terminal=False,parent_action=None,na=self.na,model=self.model,
+                              epsilon=self.epsilon,algorithm=self.algorithm,p=self.p) # initialize new root
         else:
             self.root.parent_action = None # continue from current root
         if self.root.terminal:
@@ -175,7 +240,9 @@ class MCTS():
             # Back-up 
             R = state.V         
             while state.parent_action is not None: # loop back-up until root is reached
-                R = state.r + self.gamma * R 
+                if self.algorithm == 'rents' or self.algorithm == 'ments':
+                    R = state.V
+                R = state.r + self.gamma * R
                 action = state.parent_action
                 action.update(R)
                 state = action.parent_state
@@ -184,9 +251,27 @@ class MCTS():
     def return_results(self,temp):
         ''' Process the output at the root node '''
         counts = np.array([child_action.n for child_action in self.root.child_actions])
+        pi_target = stable_normalizer(counts, temp)
         Q = np.array([child_action.Q for child_action in self.root.child_actions])
-        pi_target = stable_normalizer(counts,temp)
-        V_target = np.sum((counts/np.sum(counts))*Q)[None]
+        if self.algorithm == 'rents':
+            max_Q = np.max(Q)
+            if np.sum(self.root.priors) == 0:
+                Q = [np.exp((child_action.Q - max_Q) / TAU) for child_action in self.root.child_actions]
+            else:
+                Q = [(prior * np.exp((child_action.Q - max_Q) / TAU)) for child_action, prior in
+                     zip(self.root.child_actions, self.root.priors)]
+
+            # pi_target = Q / np.sum(Q)
+            priors = self.root.getPriors()
+            V_target = max_Q + TAU * np.log(np.sum(priors * np.exp(Q - max_Q/TAU)))[None]
+        elif self.algorithm == 'ments':
+            max_Q = np.max(Q)
+            V_target = max_Q + TAU * np.log(np.sum(np.exp(Q - max_Q / TAU)))[None]
+        elif self.algorithm == 'uct':
+            V_target = np.sum((counts/np.sum(counts))*Q)[None]
+        elif self.algorithm == 'power-uct':
+            V_target = power(np.sum((counts / np.sum(counts)) * power(Q, self.p)), 1/self.p)[None]
+
         return self.root.index,pi_target,V_target
     
     def forward(self,a,s1):
@@ -203,7 +288,8 @@ class MCTS():
             self.root = self.root.child_actions[a].child_state
 
 #### Agent ##
-def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hidden_layers,n_hidden_units):
+def agent(algorithm, game,n_ep,n_mcts,max_ep_len,lr,c,p,gamma,data_size,batch_size,temp,n_hidden_layers,n_hidden_units,
+          epsilon):
     ''' Outer training loop '''
     #tf.reset_default_graph()
     episode_returns = [] # storage
@@ -232,7 +318,8 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
                 mcts_env.reset()
                 mcts_env.seed(seed)                                
 
-            mcts = MCTS(root_index=s,root=None,model=model,na=model.action_dim,gamma=gamma) # the object responsible for MCTS searches                             
+            mcts = MCTS(root_index=s,root=None,model=model,na=model.action_dim,gamma=gamma,
+                        epsilon=epsilon,algorithm=algorithm,p=p) # the object responsible for MCTS searches
             for t in range(max_ep_len):
                 # MCTS step
                 mcts.search(n_mcts=n_mcts,c=c,Env=Env,mcts_env=mcts_env) # perform a forward search
@@ -273,50 +360,38 @@ def agent(game,n_ep,n_mcts,max_ep_len,lr,c,gamma,data_size,batch_size,temp,n_hid
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--game', default='CartPole-v0',help='Training environment')
+    parser.add_argument('--algorithm', default='uct',help='uct/power-uct/rents/ments')
+    parser.add_argument('--game', default='CartPole-v1', help='Training environment')
     parser.add_argument('--n_ep', type=int, default=500, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=32, help='Number of MCTS traces per step')
+    parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--c', type=float, default=1.5, help='UCT constant')
+    parser.add_argument('--epsilon', type=float, default=.0, help='Epsilon')
+    parser.add_argument('--p', type=float, default=1.0, help='Power constant')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
-    parser.add_argument('--gamma', type=float, default=.99, help='Discount parameter')
+    parser.add_argument('--gamma', type=float, default=1., help='Discount parameter')
     parser.add_argument('--data_size', type=int, default=1000, help='Dataset size (FIFO)')
     parser.add_argument('--batch_size', type=int, default=32, help='Minibatch size')
     parser.add_argument('--window', type=int, default=25, help='Smoothing window for visualization')
+
+    parser.add_argument('--number', type=int, default=1, help='Iteration number')
 
     parser.add_argument('--n_hidden_layers', type=int, default=2, help='Number of hidden layers in NN')
     parser.add_argument('--n_hidden_units', type=int, default=128, help='Number of units per hidden layers in NN')
 
     
     args = parser.parse_args()
-    episode_returns,timepoints,a_best,seed_best,R_best = agent(game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
-                                        max_ep_len=args.max_ep_len,lr=args.lr,c=args.c,gamma=args.gamma,
+    episode_returns,timepoints,a_best,seed_best,R_best = agent(algorithm=args.algorithm,game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
+                                        max_ep_len=args.max_ep_len,lr=args.lr,c=args.c,p=args.p,gamma=args.gamma,
                                         data_size=args.data_size,batch_size=args.batch_size,temp=args.temp,
-                                        n_hidden_layers=args.n_hidden_layers,n_hidden_units=args.n_hidden_units)
+                                        n_hidden_layers=args.n_hidden_layers,n_hidden_units=args.n_hidden_units,epsilon=args.epsilon)
 
-    # Finished training: Visualize
-    fig,ax = plt.subplots(1,figsize=[7,5])
-    total_eps = len(episode_returns)
-    episode_returns = smooth(episode_returns,args.window,mode='valid') 
-    ax.plot(symmetric_remove(np.arange(total_eps),args.window-1),episode_returns,linewidth=4,color='darkred')
-    ax.set_ylabel('Return')
-    ax.set_xlabel('Episode',color='darkred')
-    plt.savefig(os.getcwd()+'/learning_curve' + '_' + args.game + '_puct.png',bbox_inches="tight",dpi=300)
-
-    filename = os.getcwd() +  '/' + args.game + '_puct.txt'
+    # Finished training
+    filename = os.getcwd() +  '/' + args.game + '_puct.txt_' + str(args.number)
     file = open(filename,"w+")
 
     for reward in episode_returns:
         file.write(str(reward) + "\n")
 
     file.close()
-    
-#    print('Showing best episode with return {}'.format(R_best))
-#    Env = make_game(args.game)
-#    Env = wrappers.Monitor(Env,os.getcwd() + '/best_episode',force=True)
-#    Env.reset()
-#    Env.seed(seed_best)
-#    for a in a_best:
-#        Env.step(a)
-#        Env.render()
