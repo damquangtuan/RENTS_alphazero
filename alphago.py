@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-One-player Alpha Zero
-@author: Thomas Moerland, Delft University of Technology
+One-player Alpha Go
+@author: Tuan Dam, TU Darmstadt
 """
 import numpy as np
 from numpy.random import seed
@@ -75,7 +75,7 @@ def load_atari_game(argument,Env,cuda):
 ##### MCTS functions #####
 class Action():
     ''' Action object '''
-    def __init__(self,index,parent_state,Q_init=0.0,tau=0,epsilon=0,algorithm='uct',p=1.0):
+    def __init__(self,index,parent_state,Q_init=0.0,tau=0,epsilon=0,lambda_const=0,algorithm='uct',p=1.0):
         self.index = index
         self.parent_state = parent_state
         self.W = 0.0
@@ -83,12 +83,13 @@ class Action():
         self.Q = Q_init
         self.tau = tau
         self.epsilon = epsilon
+        self.lambda_const = lambda_const
         self.algorithm = algorithm
         self.p = p
 
     def add_child_state(self,s1,r,terminal,model):
         self.child_state = State(s1,r,terminal,self,self.parent_state.na,model,tau=self.tau,epsilon=self.epsilon,
-                                 algorithm=self.algorithm,p=self.p)
+                                 lambda_const= self.lambda_const,algorithm=self.algorithm,p=self.p)
         return self.child_state
 
     def update(self,R):
@@ -97,13 +98,16 @@ class Action():
         if self.algorithm == 'uct' or self.algorithm == 'power-uct':
             self.W += R
             self.Q = self.W/self.n
+        elif self.algorithm == 'maxmcts':
+            delta = R - self.Q
+            self.Q += delta / self.n
         else:
             self.Q = R
 
 class State():
     ''' State object '''
 
-    def __init__(self,index,r,terminal,parent_action,na,model,tau,epsilon,algorithm,p):
+    def __init__(self,index,r,terminal,parent_action,na,model,tau,epsilon,lambda_const,algorithm,p):
         ''' Initialize a new state '''
         self.index = np.array(index) # state
         self.r = r # reward upon arriving in this state
@@ -113,6 +117,7 @@ class State():
         self.model = model
         self.tau = tau
         self.epsilon = epsilon
+        self.lambda_const = lambda_const
         self.na = na
         self.algorithm = algorithm
         self.p = p
@@ -122,7 +127,7 @@ class State():
     def select(self,c=1.5):
         ''' Select one of the child actions based on uct rule '''
         winner = 0
-        if self.algorithm == 'uct' or self.algorithm == 'power-uct':
+        if self.algorithm == 'uct' or self.algorithm == 'power-uct' or self.algorithm == 'maxmcts':
             uct = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior
                             in zip(self.child_actions,self.priors)])
             winner = argmax(uct)
@@ -185,12 +190,12 @@ class State():
 
             self.child_actions = [
                 Action(a,parent_state=self,Q_init=np.log(self.priors[a]) + (Q_value[a] - self.V)/self.tau,tau=self.tau,
-                       epsilon=self.epsilon,algorithm=self.algorithm,p=self.p) for a in range(self.na)]
+                       epsilon=self.epsilon,lambda_const=self.lambda_const,algorithm=self.algorithm,p=self.p) for a in range(self.na)]
         elif self.algorithm == 'ments':
             self.V = max_Q + self.tau * np.log(np.sum(uct))
             self.child_actions = [
-                Action(a, parent_state=self, Q_init=(Q_value[a] - self.V) / self.tau,
-                       tau=self.tau, epsilon=self.epsilon, algorithm=self.algorithm, p=self.p) for a in range(self.na)]
+                Action(a, parent_state=self, Q_init=(Q_value[a] - self.V) / self.tau, tau=self.tau,epsilon=self.epsilon,
+                       lambda_const=self.lambda_const,algorithm=self.algorithm, p=self.p) for a in range(self.na)]
         else:
             self.V = np.mean(self.Q.detach().cpu().numpy())
             self.child_actions = [Action(a, parent_state=self, p=self.p, Q_init=Q_value[a]) for a in range(self.na)]
@@ -211,7 +216,7 @@ class State():
             MENT = [np.exp((child_action.Q - max_Q) / self.tau) for child_action in self.child_actions]
 
             self.V = max_Q + self.tau * np.log(np.sum(MENT))
-        elif self.algorithm == 'uct':
+        elif self.algorithm == 'uct' or self.algorithm == 'maxmcts':
             counts = np.array([child_action.n for child_action in self.child_actions])
             self.V = np.sum((counts / np.sum(counts)) * Q)
         elif self.algorithm == 'power-uct':
@@ -224,7 +229,7 @@ class State():
 class MCTS():
     ''' MCTS object '''
 
-    def __init__(self,root,root_index,model,na,gamma,tau,epsilon,algorithm,p):
+    def __init__(self,root,root_index,model,na,gamma,tau,epsilon,lambda_const,algorithm,p):
         self.root = None
         self.root_index = root_index
         self.model = model
@@ -232,6 +237,7 @@ class MCTS():
         self.gamma = gamma
         self.tau = tau
         self.epsilon = epsilon
+        self.lambda_const = lambda_const
         self.algorithm=algorithm
         self.p = p
 
@@ -239,7 +245,8 @@ class MCTS():
         ''' Perform the MCTS search from the root '''
         if self.root is None:
             self.root = State(self.root_index,r=0.0,terminal=False,parent_action=None,na=self.na,model=self.model,
-                              tau=self.tau,epsilon=self.epsilon,algorithm=self.algorithm,p=self.p) # initialize new root
+                              tau=self.tau,epsilon=self.epsilon,lambda_const=self.lambda_const,algorithm=self.algorithm,
+                              p=self.p) # initialize new root
         else:
             self.root.parent_action = None # continue from current root
         if self.root.terminal:
@@ -277,6 +284,10 @@ class MCTS():
                 action = state.parent_action
                 action.update(R)
                 state = action.parent_state
+                if self.algorithm == 'maxmcts':
+                    Q = [child_action.Q for child_action in state.child_actions]
+                    a = np.argmax(Q)
+                    R = (1 - self.lambda_const) * Q[a] + self.lambda_const * R
                 state.update()
 
     def return_results(self,temp):
@@ -300,7 +311,7 @@ class MCTS():
             Q = [np.exp((child_action.Q - max_Q) / self.tau) for child_action in
                  self.root.child_actions]
             pi_target = Q / np.sum(Q)
-        elif self.algorithm == 'uct' or self.algorithm == 'power-uct':
+        elif self.algorithm == 'uct' or self.algorithm == 'power-uct' or self.algorithm == 'maxmcts':
             pi_target = stable_normalizer(counts, temp)
 
         return self.root.index,pi_target,V_target
@@ -320,7 +331,7 @@ class MCTS():
             self.root = self.root.child_actions[a].child_state
 
 #### Agent ##
-def agent(algorithm,game,n_ep,n_mcts,max_ep_len,c,p,gamma,temp,tau,epsilon):
+def agent(algorithm,game,n_ep,n_mcts,max_ep_len,c,p,gamma,temp,tau,epsilon,lambda_const):
     ''' Outer training loop '''
     #tf.reset_default_graph()
     episode_returns = [] # storage
@@ -347,14 +358,14 @@ def agent(algorithm,game,n_ep,n_mcts,max_ep_len,c,p,gamma,temp,tau,epsilon):
             mcts_env.seed(seed)
 
         mcts = MCTS(root_index=s, root=None, model=model, na=Env.info.action_space.n,
-                    gamma=gamma,tau=tau,epsilon=epsilon,algorithm=algorithm,p=p)  # the object responsible for MCTS searches
+                    gamma=gamma,tau=tau,epsilon=epsilon,lambda_const=lambda_const,algorithm=algorithm,p=p)  # the object responsible for MCTS searches
         for t in range(max_ep_len):
             # MCTS step
             mcts.search(n_mcts=n_mcts, c=c, Env=Env, mcts_env=mcts_env)  # perform a forward search
             state, pi, V = mcts.return_results(temp)  # extract the root output
 
             # Make the true step
-            if algorithm == 'uct' or algorithm == 'power-uct':
+            if algorithm == 'uct' or algorithm == 'power-uct' or algorithm == 'maxmcts':
                 a = np.random.choice(len(pi), p=pi)
             else:
                 a = np.argmax(pi)
@@ -388,7 +399,7 @@ def agent(algorithm,game,n_ep,n_mcts,max_ep_len,c,p,gamma,temp,tau,epsilon):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--algorithm', default='uct',help='uct/power-uct/rents/ments')
+    parser.add_argument('--algorithm', default='uct',help='uct/power-uct/maxmcts/rents/ments')
     parser.add_argument('--game', default='breakout',help='Training environment')
     parser.add_argument('--n_ep', type=int, default=10, help='Number of episodes')
     parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
@@ -397,6 +408,7 @@ if __name__ == '__main__':
     parser.add_argument('--p', type=float, default=1.0, help='Power constant')
     parser.add_argument('--tau', type=float, default=.02, help='Tau')
     parser.add_argument('--epsilon', type=float, default=.0, help='Epsilon')
+    parser.add_argument('--lambda_const', type=float, default=.2, help='Lambda const')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
     parser.add_argument('--gamma', type=float, default=0.99, help='Discount parameter')
     parser.add_argument('--number', type=int, default=1, help='Iteration number')
@@ -405,9 +417,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     episode_returns,timepoints,a_best,seed_best,R_best = agent(algorithm=args.algorithm,game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
                                         max_ep_len=args.max_ep_len,c=args.c,p=args.p,gamma=args.gamma,
-                                        temp=args.temp,tau=args.tau,epsilon=args.epsilon)
+                                        temp=args.temp,tau=args.tau,epsilon=args.epsilon,lambda_const=args.lambda_const)
 
-    filename = os.getcwd() + '/logs_rents/' + args.game + '_' + args.algorithm + '.txt' + str(args.tau) + '_' + \
+    filename = os.getcwd() + '/logs/' + args.game + '_' + args.algorithm + '.txt' + str(args.tau) + '_' + \
                str(args.epsilon) + '_' + str(args.number)
     file = open(filename,"w+")
 
