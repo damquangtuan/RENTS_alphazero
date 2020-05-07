@@ -1,10 +1,10 @@
 List of game:
 
-AsterixNoFrameskip-v4
-BeamRiderNoFrameskip-v4
-BreakoutFrameskip-v4
-QbertNoFrameskip-v4
-SeaQuestNoFrameskip-v4
+AsterixNoFrameskip-v4,
+BeamRiderNoFrameskip-v4,
+BreakoutFrameskip-v4,
+QbertNoFrameskip-v4,
+SeaQuestNoFrameskip-v4,
 SpaceInvadersNoFrameskip-v4
 
 List of algorithm
