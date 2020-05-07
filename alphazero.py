@@ -372,7 +372,7 @@ if __name__ == '__main__':
     parser.add_argument('--algorithm', default='uct',help='uct/power-uct/maxmcts/rents/ments')
     parser.add_argument('--game', default='CartPole-v1', help='Training environment')
     parser.add_argument('--n_ep', type=int, default=500, help='Number of episodes')
-    parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
+    parser.add_argument('--n_mcts', type=int, default=32, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--c', type=float, default=1.5, help='UCT constant')

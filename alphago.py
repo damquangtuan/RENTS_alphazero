@@ -75,7 +75,7 @@ def load_atari_game(argument,Env,cuda):
 ##### MCTS functions #####
 class Action():
     ''' Action object '''
-    def __init__(self,index,parent_state,Q_init=0.0,tau=0,epsilon=0,lambda_const=0,algorithm='uct',p=1.0):
+    def __init__(self,index,parent_state,Q_init=0.0,tau=1.0,epsilon=0,lambda_const=0,algorithm='uct',p=1.0):
         self.index = index
         self.parent_state = parent_state
         self.W = 0.0
@@ -130,7 +130,7 @@ class State():
         if self.algorithm == 'uct' or self.algorithm == 'power-uct' or self.algorithm == 'maxmcts':
             uct = np.array([child_action.Q + prior * c * (np.sqrt(self.n + 1)/(child_action.n + 1)) for child_action,prior
                             in zip(self.child_actions,self.priors)])
-            winner = argmax(uct)
+            winner = np.argmax(uct)
         elif self.algorithm == 'rents':
             random = rand()
             Qs = [child_action.Q for child_action in self.child_actions]
@@ -174,15 +174,15 @@ class State():
         if args.cuda:
             self.index = self.index.cuda()
         self.Q = self.model(self.index)
-        max_Q = np.max(self.Q.detach().cpu().numpy())
-        uct = np.exp((self.Q.detach().cpu().numpy() - max_Q)/self.tau)
-        self.priors = softmax(self.Q.detach().cpu().numpy()/self.tau)
-        self.priors = np.squeeze(self.priors)
-
-        self.index = self.index.detach().cpu()
 
         Q_value = np.squeeze(self.Q.detach().cpu().numpy())
         if self.algorithm == 'rents':
+            max_Q = np.max(self.Q.detach().cpu().numpy())
+            uct = np.exp((self.Q.detach().cpu().numpy() - max_Q) / self.tau)
+            self.priors = softmax(self.Q.detach().cpu().numpy() / self.tau)
+            self.priors = np.squeeze(self.priors)
+
+            self.index = self.index.detach().cpu()
             for a in range(self.na):
                 if self.priors[a] == 0:
                     self.priors[a] = 1
@@ -192,13 +192,23 @@ class State():
                 Action(a,parent_state=self,Q_init=np.log(self.priors[a]) + (Q_value[a] - self.V)/self.tau,tau=self.tau,
                        epsilon=self.epsilon,lambda_const=self.lambda_const,algorithm=self.algorithm,p=self.p) for a in range(self.na)]
         elif self.algorithm == 'ments':
+            max_Q = np.max(self.Q.detach().cpu().numpy())
+            uct = np.exp((self.Q.detach().cpu().numpy() - max_Q) / self.tau)
+            self.priors = softmax(self.Q.detach().cpu().numpy() / self.tau)
+            self.priors = np.squeeze(self.priors)
+
+            self.index = self.index.detach().cpu()
             self.V = max_Q + self.tau * np.log(np.sum(uct))
             self.child_actions = [
                 Action(a, parent_state=self, Q_init=(Q_value[a] - self.V) / self.tau, tau=self.tau,epsilon=self.epsilon,
                        lambda_const=self.lambda_const,algorithm=self.algorithm, p=self.p) for a in range(self.na)]
         else:
             self.V = np.mean(self.Q.detach().cpu().numpy())
-            self.child_actions = [Action(a, parent_state=self, p=self.p, Q_init=Q_value[a]) for a in range(self.na)]
+            self.priors = softmax(self.Q.detach().cpu().numpy() / self.tau)
+            self.index = self.index.detach().cpu()
+            self.child_actions = [
+                Action(a, parent_state=self, Q_init=Q_value[a], tau=self.tau,epsilon=self.epsilon,
+                       lambda_const=self.lambda_const,algorithm=self.algorithm, p=self.p) for a in range(self.na)]
 
     def update(self):
         ''' update count on backward pass '''
@@ -406,7 +416,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--c', type=float, default=1.5, help='uct constant')
     parser.add_argument('--p', type=float, default=1.0, help='Power constant')
-    parser.add_argument('--tau', type=float, default=.02, help='Tau')
+    parser.add_argument('--tau', type=float, default=1.0, help='Tau')
     parser.add_argument('--epsilon', type=float, default=.0, help='Epsilon')
     parser.add_argument('--lambda_const', type=float, default=.2, help='Lambda const')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')

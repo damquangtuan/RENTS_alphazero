@@ -1,4 +1,4 @@
-List of game:
+List of games:
 
 AsterixNoFrameskip-v4
 BeamRiderNoFrameskip-v4
@@ -9,9 +9,9 @@ SpaceInvadersNoFrameskip-v4
 
 List of algorithm
 
-uct (c)
-power-uct (c and p)
-maxmcts(lambda_const)
+uct (para: c)
+power-uct (para: c and p)
+maxmcts(para: lambda_const)
 rents (para: tau and epsilon)
 ments (para: tau and epsilon)
 
