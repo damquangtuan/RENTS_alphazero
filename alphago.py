@@ -22,7 +22,7 @@ from helpers import (argmax,is_atari_game,copy_atari_state,store_safely,restore_
 from dqn_net import Network
 from set_weights import set_weights
 
-def breakout(Env):
+def breakout(Env,cuda):
     model = torch.load('models/breakout.torch')
     return model
 
@@ -422,7 +422,7 @@ if __name__ == '__main__':
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
     parser.add_argument('--gamma', type=float, default=0.99, help='Discount parameter')
     parser.add_argument('--number', type=int, default=1, help='Iteration number')
-    parser.add_argument('--cuda', action='store_true')
+    parser.add_argument('--cuda', default=True,action='store_true')
 
     args = parser.parse_args()
     episode_returns,timepoints,a_best,seed_best,R_best = agent(algorithm=args.algorithm,game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
