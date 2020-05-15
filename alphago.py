@@ -22,6 +22,54 @@ from helpers import (argmax,is_atari_game,copy_atari_state,store_safely,restore_
 from dqn_net import Network
 from set_weights import set_weights
 
+def alien(Env,cuda):
+    model = torch.load('models/alien.torch')
+    return model
+
+def amidar(Env,cuda):
+    model = torch.load('models/amidar.torch')
+    return model
+
+def asteroids(Env,cuda):
+    model = torch.load('models/asteroids.torch')
+    return model
+
+def atlantis(Env,cuda):
+    model = torch.load('models/atlantis.torch')
+    return model
+
+def enduro(Env,cuda):
+    model = torch.load('models/enduro.torch')
+    return model
+
+def freeway(Env,cuda):
+    model = torch.load('models/freeway.torch')
+    return model
+
+def frostbite(Env,cuda):
+    model = torch.load('models/frostbite.torch')
+    return model
+
+def hero(Env,cuda):
+    model = torch.load('models/hero.torch')
+    return model
+
+def ms_pacman(Env,cuda):
+    model = torch.load('models/ms_pacman.torch')
+    return model
+
+def nets(Env,cuda):
+    model = torch.load('models/nets.torch')
+    return model
+
+def pitfall(Env,cuda):
+    model = torch.load('models/pitfall.torch')
+    return model
+
+def solaris(Env,cuda):
+    model = torch.load('models/solaris.torch')
+    return model
+
 def breakout(Env,cuda):
     model = torch.load('models/breakout.torch')
     return model
@@ -59,12 +107,24 @@ def seaquest(Env,cuda=True):
 
 def load_atari_game(argument,Env,cuda):
     switcher = {
+        'AlienNoFrameskip-v4' : alien,
+        'AmidarNoFrameskip-v4': amidar,
+        'AsteroidsNoFrameskip-v4': asteroids,
+        'AtlantisNoFrameskip-v4': atlantis,
+        'EnduroNoFrameskip-v4': enduro,
+        'FreewayNoFrameskip-v4': freeway,
+        'FrostbiteNoFrameskip-v4': frostbite,
+        'HeroNoFrameskip-v4': hero,
+        'MsPacmanNoFrameskip-v4': ms_pacman,
+        'NetsNoFrameskip-v4': nets,
+        'PitfallNoFrameskip-v4': pitfall,
+        'SolarisNoFrameskip-v4': solaris,
         'BreakoutNoFrameskip-v4': breakout,
         'AsterixNoFrameskip-v4': asterix,
         'BeamRiderNoFrameskip-v4': beam_rider,
         'QbertNoFrameskip-v4': qbert,
         'SeaquestNoFrameskip-v4': seaquest,
-        'SpaceinvadersNoFrameskip-v4': space_invaders
+        'SpaceInvadersNoFrameskip-v4': space_invaders
     }
     # Get the function from switcher dictionary
     func = switcher.get(argument, lambda: "Invalid game")
@@ -220,11 +280,11 @@ class State():
             if np.sum(counts) == 0:
                 self.V = max_Q + self.tau * logsumexp((Q - max_Q) / self.tau)
             else:
-                self.V = max_Q + self.tau * np.log(np.sum(counts*np.exp((Q - max_Q)/self.tau)))
+                sum = np.sum(counts)
+                self.V = max_Q + self.tau * np.log(np.sum((counts/sum)*np.exp((Q - max_Q)/self.tau)))
         elif self.algorithm == 'ments':
             max_Q = np.max(Q)
             MENT = [np.exp((child_action.Q - max_Q) / self.tau) for child_action in self.child_actions]
-
             self.V = max_Q + self.tau * np.log(np.sum(MENT))
         elif self.algorithm == 'uct' or self.algorithm == 'maxmcts':
             counts = np.array([child_action.n for child_action in self.child_actions])
@@ -411,7 +471,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--algorithm', default='uct',help='uct/power-uct/maxmcts/rents/ments')
     parser.add_argument('--game', default='breakout',help='Training environment')
-    parser.add_argument('--n_ep', type=int, default=10, help='Number of episodes')
+    parser.add_argument('--n_ep', type=int, default=1, help='Number of episodes')
     parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--c', type=float, default=1.5, help='uct constant')
