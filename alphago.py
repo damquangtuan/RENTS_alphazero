@@ -23,55 +23,91 @@ from dqn_net import Network
 from set_weights import set_weights
 
 def alien(Env,cuda):
-    model = torch.load('models/alien.torch')
+    model = torch.load('models/alien.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def amidar(Env,cuda):
-    model = torch.load('models/amidar.torch')
+    model = torch.load('models/amidar.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def asteroids(Env,cuda):
-    model = torch.load('models/asteroids.torch')
+    model = torch.load('models/asteroids.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def bank_heist(Env,cuda):
+    model = torch.load('models/bank_heist.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def bowling(Env,cuda):
+    model = torch.load('models/bowling.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def centipede(Env,cuda):
+    model = torch.load('models/centipede.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def demon_attack(Env,cuda):
+    model = torch.load('models/demon_attack.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def gopher(Env,cuda):
+    model = torch.load('models/gopher.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def krull(Env,cuda):
+    model = torch.load('models/krull.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def phoenix(Env,cuda):
+    model = torch.load('models/phoenix.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def robotank(Env,cuda):
+    model = torch.load('models/robotank.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
+    return model
+
+def wizard_of_wor(Env,cuda):
+    model = torch.load('models/wizard_of_wor.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def atlantis(Env,cuda):
-    model = torch.load('models/atlantis.torch')
+    model = torch.load('models/atlantis.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def enduro(Env,cuda):
-    model = torch.load('models/enduro.torch')
+    model = torch.load('models/enduro.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def freeway(Env,cuda):
-    model = torch.load('models/freeway.torch')
+    model = torch.load('models/freeway.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def frostbite(Env,cuda):
-    model = torch.load('models/frostbite.torch')
+    model = torch.load('models/frostbite.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def hero(Env,cuda):
-    model = torch.load('models/hero.torch')
+    model = torch.load('models/hero.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def ms_pacman(Env,cuda):
-    model = torch.load('models/ms_pacman.torch')
+    model = torch.load('models/ms_pacman.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def nets(Env,cuda):
-    model = torch.load('models/nets.torch')
+    model = torch.load('models/nets.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def pitfall(Env,cuda):
-    model = torch.load('models/pitfall.torch')
+    model = torch.load('models/pitfall.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def solaris(Env,cuda):
-    model = torch.load('models/solaris.torch')
+    model = torch.load('models/solaris.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def breakout(Env,cuda):
-    model = torch.load('models/breakout.torch')
+    model = torch.load('models/breakout.torch', map_location=torch.device('cuda') if cuda else torch.device('cpu'))
     return model
 
 def asterix(Env,cuda=True):
@@ -110,6 +146,15 @@ def load_atari_game(argument,Env,cuda):
         'AlienNoFrameskip-v4' : alien,
         'AmidarNoFrameskip-v4': amidar,
         'AsteroidsNoFrameskip-v4': asteroids,
+        'BankHeistNoFrameskip-v4': bank_heist,
+        'BowlingNoFrameskip-v4': bowling,
+        'CentipedeNoFrameskip-v4': centipede,
+        'DemonAttackNoFrameskip-v4': demon_attack,
+            'GopherNoFrameskip-v4': gopher,
+        'KrullNoFrameskip-v4': krull,
+        'PhoenixNoFrameskip-v4': phoenix,
+        'RobotankNoFrameskip-v4': robotank,
+        'WizardOfWorNoFrameskip-v4': wizard_of_wor,
         'AtlantisNoFrameskip-v4': atlantis,
         'EnduroNoFrameskip-v4': enduro,
         'FreewayNoFrameskip-v4': freeway,
@@ -471,7 +516,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--algorithm', default='uct',help='uct/power-uct/maxmcts/rents/ments')
     parser.add_argument('--game', default='breakout',help='Training environment')
-    parser.add_argument('--n_ep', type=int, default=1, help='Number of episodes')
+    parser.add_argument('--n_ep', type=int, default=100, help='Number of episodes')
     parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--c', type=float, default=1.5, help='uct constant')
@@ -482,7 +527,7 @@ if __name__ == '__main__':
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
     parser.add_argument('--gamma', type=float, default=0.99, help='Discount parameter')
     parser.add_argument('--number', type=int, default=1, help='Iteration number')
-    parser.add_argument('--cuda', default=True,action='store_true')
+    parser.add_argument('--cuda', default=False,action='store_true')
 
     args = parser.parse_args()
     episode_returns,timepoints,a_best,seed_best,R_best = agent(algorithm=args.algorithm,game=args.game,n_ep=args.n_ep,n_mcts=args.n_mcts,
