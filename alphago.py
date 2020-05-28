@@ -150,7 +150,7 @@ def load_atari_game(argument,Env,cuda):
         'BowlingNoFrameskip-v4': bowling,
         'CentipedeNoFrameskip-v4': centipede,
         'DemonAttackNoFrameskip-v4': demon_attack,
-            'GopherNoFrameskip-v4': gopher,
+        'GopherNoFrameskip-v4': gopher,
         'KrullNoFrameskip-v4': krull,
         'PhoenixNoFrameskip-v4': phoenix,
         'RobotankNoFrameskip-v4': robotank,
@@ -268,6 +268,28 @@ class State():
                 winner = np.random.choice(len(self.child_actions), p=uct)
             else:
                 winner = np.random.randint(self.na)
+        elif self.algorithm == 'tsallis':
+            Qs = [child_action.Q/self.tau for child_action in self.child_actions]
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+
+            pi = [np.maximum(Q - sp_max, 0) for Q in Qs]
+            pi = pi/np.sum(pi) #normalize
+
+            random = rand()
+            para_lambda = self.epsilon * (self.na / np.log(self.n + 1))
+            if random > para_lambda:
+                winner = np.random.choice(len(self.child_actions), p=pi)
+            else:
+                winner = np.random.randint(self.na)
 
         return self.child_actions[winner]
 
@@ -307,6 +329,49 @@ class State():
             self.child_actions = [
                 Action(a, parent_state=self, Q_init=(Q_value[a] - self.V) / self.tau, tau=self.tau,epsilon=self.epsilon,
                        lambda_const=self.lambda_const,algorithm=self.algorithm, p=self.p) for a in range(self.na)]
+        elif self.algorithm == 'tsallis':
+            Q_value = Q_value/self.tau
+            Qs = np.squeeze(Q_value)
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+
+            self.priors = [np.maximum(Q - sp_max, 0) for Q in Qs]
+
+            self.V = 0.0
+            second = sp_max * sp_max
+            for Q in Q_sp_max:
+                if Q == 0:
+                    break
+                first = Q * Q
+                self.V += first - second
+
+            self.V = self.tau * (0.5 * self.V + 0.5)
+
+            self.index = self.index.detach().cpu()
+            Q_value = np.squeeze(self.Q.detach().cpu().numpy())
+
+            # log_priors = self.priors
+            # for index, value in enumerate(self.priors):
+            #     if value > 0:
+            #         log_priors[index] = np.log(value)
+            #     else:
+            #         log_priors[index] = 0
+
+            # self.child_actions = [
+            #     Action(a, parent_state=self, Q_init=log_priors[a],tau=self.tau,epsilon=self.epsilon,
+            #            lambda_const=self.lambda_const,algorithm=self.algorithm, p=self.p) for a in range(self.na)]
+
+            self.child_actions = [
+                Action(a, parent_state=self, Q_init=(Q_value[a] - self.V)/self.tau,tau=self.tau,epsilon=self.epsilon,
+                       lambda_const=self.lambda_const,algorithm=self.algorithm, p=self.p) for a in range(self.na)]
         else:
             self.V = np.mean(self.Q.detach().cpu().numpy())
             self.priors = softmax(self.Q.detach().cpu().numpy() / self.tau)
@@ -340,6 +405,28 @@ class State():
             for child_action in self.child_actions:
                 self.V += (child_action.n / np.sum(counts)) * power(child_action.Q, self.p)
             self.V = power(self.V, 1 / self.p)
+        elif self.algorithm == 'tsallis':
+            Qs = [child_action.Q/self.tau for child_action in self.child_actions]
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+
+            self.V = 0.0
+            second = (sp_max * sp_max)
+            for Q in Q_sp_max:
+                if (Q == 0):
+                    break
+                first = Q * Q
+                self.V += first - second
+
+            self.V = self.tau * (0.5 * self.V + 0.5)
 
 class MCTS():
     ''' MCTS object '''
@@ -393,7 +480,7 @@ class MCTS():
             # Back-up
             R = state.V
             while state.parent_action is not None: # loop back-up until root is reached
-                if self.algorithm == 'rents' or self.algorithm == 'ments':
+                if self.algorithm == 'rents' or self.algorithm == 'ments' or self.algorithm == 'tsallis':
                     R = state.V
                 R = state.r + self.gamma * R
                 action = state.parent_action
@@ -426,6 +513,20 @@ class MCTS():
             Q = [np.exp((child_action.Q - max_Q) / self.tau) for child_action in
                  self.root.child_actions]
             pi_target = Q / np.sum(Q)
+        elif self.algorithm == 'tsallis':
+            Qs = [child_action.Q/self.tau for child_action in self.root.child_actions]
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+            pi_target = [np.maximum(Q - sp_max, 0) for Q in Qs]
+            pi_target = pi_target / np.sum(pi_target)
         elif self.algorithm == 'uct' or self.algorithm == 'power-uct' or self.algorithm == 'maxmcts':
             pi_target = stable_normalizer(counts, temp)
 
@@ -516,7 +617,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--algorithm', default='uct',help='uct/power-uct/maxmcts/rents/ments')
     parser.add_argument('--game', default='breakout',help='Training environment')
-    parser.add_argument('--n_ep', type=int, default=100, help='Number of episodes')
+    parser.add_argument('--n_ep', type=int, default=5, help='Number of episodes')
     parser.add_argument('--n_mcts', type=int, default=512, help='Number of MCTS traces per step')
     parser.add_argument('--max_ep_len', type=int, default=2000, help='Maximum number of steps per episode')
     parser.add_argument('--c', type=float, default=1.5, help='uct constant')
