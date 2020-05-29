@@ -44,9 +44,10 @@ class Model():
             x = slim.fully_connected(x,n_hidden_units,activation_fn=tf.nn.elu)
             
         # Output
-        log_pi_hat = slim.fully_connected(x,self.action_dim,activation_fn=None) 
-        self.pi_hat = tf.nn.softmax(log_pi_hat) # policy head           
+        log_pi_hat = slim.fully_connected(x,self.action_dim,activation_fn=None)
+        self.pi_hat = tf.nn.softmax(log_pi_hat) # policy head
         self.V_hat = slim.fully_connected(x,1,activation_fn=None) # value head
+        self.Q = slim.fully_connected(x,self.action_dim,activation_fn=None)
 
         # Loss
         self.V = tf.placeholder("float32", shape=[None,1],name='V')
@@ -69,6 +70,9 @@ class Model():
         
     def predict_pi(self,s):
         return self.sess.run(self.pi_hat,feed_dict={self.x:s})
+
+    def get_Q(self,s):
+        return self.sess.run(self.Q,feed_dict={self.x:s})
    
 ##### MCTS functions #####
       
@@ -116,12 +120,16 @@ class State():
         self.lambda_const = lambda_const
         self.algorithm = algorithm
         self.p = p
-        
+        self.na = na
+
         self.evaluate()
         # Child actions
-        self.na = na
-        self.child_actions = [Action(a,parent_state=self,Q_init=self.V,epsilon=self.epsilon,lambda_const=lambda_const,
-                                     algorithm=algorithm,p=p) for a in range(na)]
+        if algorithm == 'maxmcts':
+            self.child_actions = [Action(a, parent_state=self, Q_init=self.Q[a], epsilon=self.epsilon, lambda_const=lambda_const,
+                                         algorithm=algorithm, p=p) for a in range(na)]
+        else:
+            self.child_actions = [Action(a,parent_state=self,Q_init=self.V,epsilon=self.epsilon,lambda_const=lambda_const,
+                                         algorithm=algorithm,p=p) for a in range(na)]
         if not self.model.state_discrete:
             self.priors = model.predict_pi(index[None,]).flatten()
         else:
@@ -151,12 +159,34 @@ class State():
             random = rand()
             Qs = [child_action.Q for child_action in self.child_actions]
             max_Q = np.max(Qs)
-            UCT = [np.exp((child_action.Q - max_Q) / self.p_tau) for child_action in self.child_actions]
+            UCT = [np.exp((child_action.Q - max_Q) / TAU) for child_action in self.child_actions]
             UCT = np.squeeze(UCT)
             UCT = UCT / np.sum(UCT)
             para_lambda = self.epsilon * (self.na / np.log(self.n + 1))
             if random > para_lambda:
                 winner = np.random.choice(len(self.child_actions), p=UCT)
+            else:
+                winner = np.random.randint(self.na)
+        elif self.algorithm == 'tsallis':
+            Qs = [child_action.Q/TAU for child_action in self.child_actions]
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+
+            pi = [np.maximum(Q - sp_max, 0) for Q in Qs]
+            pi = pi/np.sum(pi) #normalize
+
+            random = rand()
+            para_lambda = self.epsilon * (self.na / np.log(self.n + 1))
+            if random > para_lambda:
+                winner = np.random.choice(len(self.child_actions), p=pi)
             else:
                 winner = np.random.randint(self.na)
 
@@ -166,9 +196,12 @@ class State():
         ''' Bootstrap the state value '''
         if not self.model.state_discrete:
             self.V = np.squeeze(self.model.predict_V(self.index[None,])) if not self.terminal else np.array(0.0)
+            self.Q = np.squeeze(self.model.get_Q(self.index[None,])) if not self.terminal else np.zeros(self.na)
         else:
             index = np.reshape(self.index, (1, -1))
             self.V = np.squeeze(self.model.predict_V(index)) if not self.terminal else np.array(0.0)
+            self.Q = np.squeeze(self.model.get_Q(index)) if not self.terminal else np.zeros(self.na)
+
 
     def update(self):
         ''' update count on backward pass '''
@@ -196,6 +229,28 @@ class State():
             Q_exp = np.array([np.exp((child_action.Q - max_Q) / TAU) for child_action, prior in
                               zip(self.child_actions, self.priors)])
             self.V = max_Q + TAU * np.log(np.sum(Q_exp))
+        elif self.algorithm == 'tsallis':
+            Qs = [child_action.Q/TAU for child_action in self.child_actions]
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+
+            self.V = 0.0
+            second = (sp_max * sp_max)
+            for Q in Q_sp_max:
+                if (Q == 0):
+                    break
+                first = Q * Q
+                self.V += first - second
+
+            self.V = TAU * (0.5 * self.V + 0.5)
 
         
 class MCTS():
@@ -246,7 +301,7 @@ class MCTS():
             # Back-up 
             R = state.V         
             while state.parent_action is not None: # loop back-up until root is reached
-                if self.algorithm == 'rents' or self.algorithm == 'ments':
+                if self.algorithm == 'rents' or self.algorithm == 'ments' or self.algorithm == 'tsallis':
                     R = state.V
                 R = state.r + self.gamma * R
                 action = state.parent_action
@@ -280,6 +335,31 @@ class MCTS():
             V_target = np.sum((counts/np.sum(counts))*Q)[None]
         elif self.algorithm == 'power-uct':
             V_target = power(np.sum((counts / np.sum(counts)) * power(Q, self.p)), 1/self.p)[None]
+        elif self.algorithm == 'tsallis':
+            Qs = [child_action.Q/TAU for child_action in self.root.child_actions]
+            Qs_sorted = np.sort(Qs)[::-1]
+            Qs_cumsum = np.cumsum(Qs_sorted)
+
+            K = np.arange(1, self.na + 1)
+            Q_check = 1 + K * Qs_sorted > Qs_cumsum
+            Q_check = Q_check.astype(int)
+
+            K_sum = np.sum(Q_check)
+            Q_sp_max = [q * check for q, check in zip(Qs_sorted, Q_check)]
+            sp_max = (np.sum(Q_sp_max) - 1) / K_sum
+            # pi_target = [np.maximum(Q - sp_max, 0) for Q in Qs]
+            # pi_target = pi_target / np.sum(pi_target)
+
+            V_target = 0.0
+            second = (sp_max * sp_max)
+            for Q in Q_sp_max:
+                if (Q == 0):
+                    break
+                first = Q * Q
+                V_target += first - second
+
+            V_target = TAU * (0.5 * V_target + 0.5)
+
 
         return self.root.index,pi_target,V_target
     
@@ -376,7 +456,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_ep_len', type=int, default=300, help='Maximum number of steps per episode')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--c', type=float, default=1.5, help='UCT constant')
-    parser.add_argument('--epsilon', type=float, default=.0, help='Epsilon')
+    parser.add_argument('--epsilon', type=float, default=.1, help='Epsilon')
     parser.add_argument('--lambda_const', type=float, default=.2, help='Lambda const')
     parser.add_argument('--p', type=float, default=1.0, help='Power constant')
     parser.add_argument('--temp', type=float, default=1.0, help='Temperature in normalization of counts to policy target')
@@ -399,7 +479,7 @@ if __name__ == '__main__':
                                         epsilon=args.epsilon,lambda_const=args.lambda_const)
 
     # Finished training
-    filename = os.getcwd() +  '/' + args.game + '_puct.txt_' + str(args.number)
+    filename = os.getcwd() +  '/logs/' + args.game + '_' + args.algorithm + '.txt_' + str(args.number)
     file = open(filename,"w+")
 
     for reward in episode_returns:
